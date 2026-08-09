@@ -14,7 +14,19 @@ function fmtDateTime(v){return v?new Date(v).toLocaleString('en-IN',{day:'2-digi
 function fmtDate(v){return v?new Date(v).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''}
 function paymentBadge(m){return m==='CASH'?'💵 CASH':m==='ONLINE'?'📱 ONLINE':'—'}
 const money=v=>'₹'+Number(v||0).toLocaleString('en-IN',{maximumFractionDigits:2});
-const today=()=>new Date().toISOString().slice(0,10);
+const today=()=>{const d=new Date();const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`};
+const dateKey=d=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`};
+function salaryPeriod(type, ref=new Date()){
+  const d=new Date(ref.getFullYear(),ref.getMonth(),ref.getDate());
+  if(String(type||'WEEKLY').toUpperCase()==='MONTHLY'){
+    const start=new Date(d.getFullYear(),d.getMonth(),1), end=new Date(d.getFullYear(),d.getMonth()+1,0);
+    return {start:dateKey(start),end:dateKey(end),label:`${fmtDate(start)} → ${fmtDate(end)}`};
+  }
+  const day=(d.getDay()+6)%7; // Monday = 0
+  const start=new Date(d); start.setDate(d.getDate()-day);
+  const end=new Date(start); end.setDate(start.getDate()+6);
+  return {start:dateKey(start),end:dateKey(end),label:`${fmtDate(start)} → ${fmtDate(end)}`};
+}
 const dt=v=>v?new Date(v).toLocaleString('en-IN',{dateStyle:'short',timeStyle:'short'}):'-';
 const total=o=>Number(o?.total||0);
 
@@ -178,7 +190,10 @@ function App(){
    await Promise.all([loadEmployees(),loadAdvances()]);setMsg(`${e.name}: lending amount ${money(amount)} added.`);
  }
  async function paySalary(e,periodStart,periodEnd,allowance,incentive,personalExpense,advanceDeduction){
-   const days=attendance.filter(a=>a.employee_id===e.id&&a.status==='PRESENT'&&a.attendance_date>=periodStart&&a.attendance_date<=periodEnd).length;
+   const alreadyPaid=salaryPayments.some(p=>p.employee_id===e.id&&p.payment_type===(e.payment_type||'WEEKLY')&&p.period_start===periodStart&&p.period_end===periodEnd&&p.status==='PAID');
+   if(alreadyPaid){setMsg(`${e.name}: salary for this period is already marked as paid.`);return}
+   const rows=attendance.filter(a=>a.employee_id===e.id&&a.attendance_date>=periodStart&&a.attendance_date<=periodEnd);
+   const days=rows.reduce((sum,a)=>sum+(a.status==='PRESENT'?1:a.status==='HALF_DAY'?.5:0),0);
    const base=days*Number(e.per_day_salary||0);
    const gross=base+Number(allowance||0)+Number(incentive||0)-Number(personalExpense||0);
    const maxAdvance=Number(e.advance_balance||0);
@@ -188,13 +203,14 @@ function App(){
    if(error){setMsg(error.message);return}
    if(deduction>0){
      let remaining=deduction;
-     const rows=advances.filter(a=>a.employee_id===e.id&&Number(a.remaining_amount)>0).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-     for(const a of rows){const d=Math.min(remaining,Number(a.remaining_amount));await supabase.from('employee_advances').update({remaining_amount:Number(a.remaining_amount)-d}).eq('id',a.id);remaining-=d;if(remaining<=0)break}
-     await supabase.from('employees').update({advance_balance:maxAdvance-deduction}).eq('id',e.id);
+     const advRows=advances.filter(a=>a.employee_id===e.id&&Number(a.remaining_amount)>0).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+     for(const a of advRows){const d=Math.min(remaining,Number(a.remaining_amount));await supabase.from('employee_advances').update({remaining_amount:Number(a.remaining_amount)-d}).eq('id',a.id);remaining-=d;if(remaining<=0)break}
+     await supabase.from('employees').update({advance_balance:Math.max(maxAdvance-deduction,0)}).eq('id',e.id);
    }
    await Promise.all([loadEmployees(),loadSalaryPayments(),loadAdvances()]);
-   setMsg(`${e.name}: salary ${money(net)} marked as paid.`);
+   setMsg(`${e.name}: ${e.payment_type==='MONTHLY'?'Monthly':'Weekly'} salary ${money(net)} marked as paid.`);
  }
+
  async function addExpense(){const description=prompt('Expense description');if(!description)return;const amount=Number(prompt('Amount'));if(!amount)return;const{error}=await supabase.from('expenses').insert({description,amount});if(error)setMsg(error.message);else loadExpenses()}
 
  if(loading)return <div className="splash">Loading Brottta POS...</div>;
@@ -339,29 +355,36 @@ function Menu({menu,save,del}){
 }
 
 function Employees({data,add,update,addAdvance,advances,payments,attendance,paySalary}){
- const [selected,setSelected]=useState(null),[openPay,setOpenPay]=useState(null),[openAdv,setOpenAdv]=useState(null);
- const [from,setFrom]=useState(''),[to,setTo]=useState('');
+ const [openPay,setOpenPay]=useState(null),[openAdv,setOpenAdv]=useState(null);
  const [allowance,setAllowance]=useState(0),[incentive,setIncentive]=useState(0),[personalExpense,setPersonalExpense]=useState(0),[deduction,setDeduction]=useState(0);
- const [salaryPaid,setSalaryPaid]=useState(false);
- const saveSettings=async(e)=>{await update(e,{payment_type:e._payment_type||e.payment_type||'WEEKLY',per_day_salary:Number(e._per_day_salary??e.per_day_salary??0)})};
- const calcDays=e=>attendance.filter(a=>a.employee_id===e.id&&a.status==='PRESENT'&&a.attendance_date>=from&&a.attendance_date<=to).length;
- const period=()=>{
-   const now=new Date(), y=now.getFullYear(),m=now.getMonth(),d=now.getDate();
-   if(!from||!to)return;
-   return `${from} → ${to}`;
+ const [payPeriod,setPayPeriod]=useState(null);
+ const openSalary=e=>{
+   const p=salaryPeriod(e.payment_type||'WEEKLY');
+   setOpenPay(e);setPayPeriod(p);setAllowance(0);setIncentive(0);setPersonalExpense(0);setDeduction(0);
  };
- const payDays=openPay&&from&&to?calcDays(openPay):0;
+ const calcDays=e=>{
+   if(!payPeriod)return 0;
+   return attendance.filter(a=>a.employee_id===e.id&&a.attendance_date>=payPeriod.start&&a.attendance_date<=payPeriod.end)
+     .reduce((sum,a)=>sum+(a.status==='PRESENT'?1:a.status==='HALF_DAY'?.5:0),0);
+ };
+ const isPaid=e=>payPeriod?payments.some(p=>p.employee_id===e.id&&p.payment_type===(e.payment_type||'WEEKLY')&&p.period_start===payPeriod.start&&p.period_end===payPeriod.end&&p.status==='PAID'):false;
+ const payDays=openPay?calcDays(openPay):0;
  const payBase=openPay?payDays*Number(openPay.per_day_salary||0):0;
  const payGross=payBase+Number(allowance||0)+Number(incentive||0)-Number(personalExpense||0);
- const payAdvance=Math.min(Number(deduction||0),Number(openPay?.advance_balance||0));
+ const payAdvance=Math.min(Math.max(Number(deduction||0),0),Number(openPay?.advance_balance||0));
  const payNet=Math.max(payGross-payAdvance,0);
  const payRemaining=Math.max(Number(openPay?.advance_balance||0)-payAdvance,0);
- return <><Title t="Employees" s="Payment settings, salary, advances and employee dashboard"><button className="primary" onClick={add}>+ Add Employee</button></Title>
- <Panel t="Employee Salary Dashboard"><div className="employeeSummaryGrid">{data.filter(e=>e.active!==false).map(e=>{const p=payments.filter(x=>x.employee_id===e.id);const week=p.filter(x=>x.payment_type==='WEEKLY').reduce((s,x)=>s+Number(x.net_salary||0),0);const month=p.filter(x=>x.payment_type==='MONTHLY').reduce((s,x)=>s+Number(x.net_salary||0),0);return <div className="card" key={e.id}><div><b>{e.name}</b> <span className="roleSpace">{e.role}</span></div><small>{e.payment_type||'WEEKLY'} · ₹{Number(e.per_day_salary||0).toLocaleString('en-IN')}/day</small><div className="salaryMini"><span>Weekly paid <b>{money(week)}</b></span><span>Monthly paid <b>{money(month)}</b></span><span>Pending lending <b>{money(e.advance_balance)}</b></span></div></div>})}</div></Panel>
- <Panel t="Employee Payment Settings"><div className="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Payment Type</th><th>Per Day Salary</th><th>Advance Balance</th><th>Actions</th></tr></thead><tbody>{data.map(e=><tr key={e.id}><td><b>{e.name}</b></td><td><span className="roleSpace">{e.role}</span></td><td><div className="payToggle"><button className={(e.payment_type||'WEEKLY')==='WEEKLY'?'on':''} onClick={()=>update(e,{payment_type:'WEEKLY'})}>Weekly</button><button className={(e.payment_type||'WEEKLY')==='MONTHLY'?'on':''} onClick={()=>update(e,{payment_type:'MONTHLY'})}>Monthly</button></div></td><td><input className="inlineInput" type="number" defaultValue={e.per_day_salary||0} onBlur={x=>update(e,{per_day_salary:Number(x.target.value||0)})}/></td><td>{money(e.advance_balance||0)}</td><td><button className="small" onClick={()=>setOpenAdv(e)}>+ Lending</button> <button className="small" onClick={()=>{setOpenPay(e);setFrom('');setTo('');setAllowance(0);setIncentive(0);setPersonalExpense(0);setDeduction(0)}}>Salary</button></td></tr>)}</tbody></table></div></Panel>
- <Panel t="Salary Payment History"><div className="tablewrap"><table><thead><tr><th>Employee</th><th>Period</th><th>Days</th><th>Gross</th><th>Advance Deducted</th><th>Net Salary</th><th>Status</th></tr></thead><tbody>{payments.map(p=>{const e=data.find(x=>x.id===p.employee_id);return <tr key={p.id}><td>{e?.name||'—'}</td><td>{fmtDate(p.period_start)} → {fmtDate(p.period_end)}</td><td>{p.present_days}</td><td>{money(p.gross_salary)}</td><td>{money(p.advance_deduction)}</td><td><b>{money(p.net_salary)}</b></td><td><span className="paidBadge">✓ SALARY PAID</span></td></tr>})}</tbody></table></div></Panel>
+ return <><Title t="Employees" s="Automatic weekly/monthly salary calculation, advances and payment history"><button className="primary" onClick={add}>+ Add Employee</button></Title>
+ <Panel t="Employee Salary Dashboard"><div className="employeeSummaryGrid">{data.filter(e=>e.active!==false).map(e=>{
+   const p=payments.filter(x=>x.employee_id===e.id);
+   const week=p.filter(x=>x.payment_type==='WEEKLY').reduce((s,x)=>s+Number(x.net_salary||0),0);
+   const month=p.filter(x=>x.payment_type==='MONTHLY').reduce((s,x)=>s+Number(x.net_salary||0),0);
+   return <div className="card" key={e.id}><div><b>{e.name}</b> <span className="roleSpace">{e.role}</span></div><small>{e.payment_type||'WEEKLY'} · ₹{Number(e.per_day_salary||0).toLocaleString('en-IN')}/day</small><div className="salaryMini"><span>Weekly paid <b>{money(week)}</b></span><span>Monthly paid <b>{money(month)}</b></span><span>Pending lending <b>{money(e.advance_balance)}</b></span></div></div>
+ })}</div></Panel>
+ <Panel t="Employee Payment Settings"><div className="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Payment Type</th><th>Per Day Salary</th><th>Current Period</th><th>Advance Balance</th><th>Actions</th></tr></thead><tbody>{data.map(e=>{const current=salaryPeriod(e.payment_type||'WEEKLY');const paid=payments.some(p=>p.employee_id===e.id&&p.payment_type===(e.payment_type||'WEEKLY')&&p.period_start===current.start&&p.period_end===current.end&&p.status==='PAID');return <tr key={e.id}><td><b>{e.name}</b></td><td><span className="roleSpace">{e.role}</span></td><td><div className="payToggle"><button className={(e.payment_type||'WEEKLY')==='WEEKLY'?'on':''} onClick={()=>update(e,{payment_type:'WEEKLY'})}>Weekly</button><button className={(e.payment_type||'WEEKLY')==='MONTHLY'?'on':''} onClick={()=>update(e,{payment_type:'MONTHLY'})}>Monthly</button></div></td><td><input className="inlineInput" type="number" min="0" defaultValue={e.per_day_salary||0} onBlur={x=>update(e,{per_day_salary:Number(x.target.value||0)})}/></td><td><small>{current.label}</small></td><td>{money(e.advance_balance||0)}</td><td><button className="small" onClick={()=>setOpenAdv(e)}>+ Lending</button> <button className="small" onClick={()=>openSalary(e)}>Review Salary</button>{paid&&<span className="paidBadge">✓ SALARY PAID</span>}</td></tr>})}</tbody></table></div></Panel>
+ <Panel t="Salary Payment History"><div className="tablewrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Period</th><th>Days</th><th>Gross</th><th>Advance Deducted</th><th>Net Salary</th><th>Status</th></tr></thead><tbody>{payments.map(p=>{const e=data.find(x=>x.id===p.employee_id);return <tr key={p.id}><td>{e?.name||'—'}</td><td>{p.payment_type}</td><td>{fmtDate(p.period_start)} → {fmtDate(p.period_end)}</td><td>{p.present_days}</td><td>{money(p.gross_salary)}</td><td>{money(p.advance_deduction)}</td><td><b>{money(p.net_salary)}</b></td><td><span className="paidBadge">✓ SALARY PAID</span></td></tr>})}</tbody></table></div></Panel>
  {openAdv&&<div className="drawerBackdrop" onClick={()=>setOpenAdv(null)}><aside className="drawer" onClick={e=>e.stopPropagation()}><div className="drawerHead"><h2>Lending — {openAdv.name}</h2><button onClick={()=>setOpenAdv(null)}>×</button></div><p>Current pending lending: <b>{money(openAdv.advance_balance||0)}</b></p><label>Lending amount<input id="advanceAmount" type="number" min="0"/></label><label>Note<input id="advanceNote" placeholder="Reason / note"/></label><button className="primary full" onClick={async()=>{const a=Number(document.getElementById('advanceAmount').value||0);await addAdvance(openAdv,a,document.getElementById('advanceNote').value);setOpenAdv(null)}}>Add Lending</button></aside></div>}
- {openPay&&<div className="drawerBackdrop" onClick={()=>setOpenPay(null)}><aside className="drawer" onClick={e=>e.stopPropagation()}><div className="drawerHead"><h2>Salary — {openPay.name}</h2><button onClick={()=>setOpenPay(null)}>×</button></div><label>Period start<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>Period end<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label><p>Present days: <b>{payDays}</b></p><p>Base salary: <b>{money(payBase)}</b></p><label>Allowance<input type="number" value={allowance} onChange={e=>setAllowance(e.target.value)}/></label><label>Incentive<input type="number" value={incentive} onChange={e=>setIncentive(e.target.value)}/></label><label>Personal Expense / Deduction<input type="number" value={personalExpense} onChange={e=>setPersonalExpense(e.target.value)}/></label><label>Advance Deduction<input type="number" max={openPay.advance_balance||0} value={deduction} onChange={e=>setDeduction(e.target.value)}/></label><div className="salaryCalc"><div>Gross: <b>{money(payGross)}</b></div><div>Remaining lending: <b>{money(payRemaining)}</b></div><div>Net salary: <b>{money(payNet)}</b></div></div><button className="success full" disabled={!from||!to} onClick={async()=>{await paySalary(openPay,from,to,allowance,incentive,personalExpense,deduction);setOpenPay(null)}}>✓ MARK SALARY PAID</button></aside></div>}
+ {openPay&&payPeriod&&<div className="drawerBackdrop" onClick={()=>setOpenPay(null)}><aside className="drawer" onClick={e=>e.stopPropagation()}><div className="drawerHead"><h2>Salary Review — {openPay.name}</h2><button onClick={()=>setOpenPay(null)}>×</button></div><div className="salaryPeriodBox"><b>{openPay.payment_type==='MONTHLY'?'MONTHLY SALARY':'WEEKLY SALARY'}</b><span>{payPeriod.label}</span><small>{openPay.payment_type==='MONTHLY'?'Current calendar month':'Monday to Sunday'}</small></div><p>Present days: <b>{payDays}</b> <small>(Half day counts as 0.5)</small></p><p>Base salary: <b>{money(payBase)}</b></p><label>Allowance<input type="number" min="0" value={allowance} onChange={e=>setAllowance(e.target.value)} /></label><label>Incentive<input type="number" min="0" value={incentive} onChange={e=>setIncentive(e.target.value)} /></label><label>Expense Deduction<input type="number" min="0" value={personalExpense} onChange={e=>setPersonalExpense(e.target.value)} /></label><label>Advance Deduction <small>Pending: {money(openPay.advance_balance||0)}</small><input type="number" min="0" max={openPay.advance_balance||0} value={deduction} onChange={e=>setDeduction(e.target.value)} /></label><div className="salaryCalc"><div>Gross salary: <b>{money(payGross)}</b></div><div>Advance remaining: <b>{money(payRemaining)}</b></div><div>Net salary: <b>{money(payNet)}</b></div></div>{isPaid(openPay)?<div className="paidBox">✓ SALARY PAID FOR THIS PERIOD</div>:<button className="success full" onClick={async()=>{await paySalary(openPay,payPeriod.start,payPeriod.end,allowance,incentive,personalExpense,deduction);setOpenPay(null)}}>✓ MARK SALARY PAID — {money(payNet)}</button>}</aside></div>}
  </>}
 
 

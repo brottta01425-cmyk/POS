@@ -204,3 +204,7 @@ create policy "Authenticated staff can manage employee advances" on public.emplo
 
 drop policy if exists "Authenticated staff can manage salary payments" on public.salary_payments;
 create policy "Authenticated staff can manage salary payments" on public.salary_payments for all to authenticated using (true) with check (true);
+
+-- v7 payroll behavior is calculated in the app: weekly periods are Monday-Sunday;
+-- monthly periods are the first through last day of the current calendar month.
+-- HALF_DAY attendance counts as 0.5 day toward salary.

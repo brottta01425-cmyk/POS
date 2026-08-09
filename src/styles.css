@@ -67,3 +67,4 @@ table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px s
 .salaryCalc{display:grid;gap:7px;padding:12px;border-radius:10px;background:var(--muted,#f3f4f6);margin:10px 0}
 @media(max-width:900px){.employeeSummaryGrid,.attendanceGrid{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.employeeSummaryGrid,.attendanceGrid{grid-template-columns:1fr}.exportBar{justify-content:flex-start;flex-wrap:wrap}}
+.salaryPeriodBox{display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid var(--border);border-radius:10px;margin:10px 0 14px}.salaryPeriodBox span{font-size:16px;font-weight:800}.salaryPeriodBox small{opacity:.7}.paidBox{padding:12px;border-radius:10px;margin-top:12px;font-weight:800;background:#dcfce7;color:#166534}.paidBadge{display:inline-block;margin-left:8px;white-space:nowrap}
