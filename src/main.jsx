@@ -8,7 +8,21 @@ const ROLES={admin:'Admin',waiter:'Waiter',chef:'Chef',cashier:'Cashier'};
 const TABLES=Array.from({length:20},(_,i)=>i+1);
 const STATUS={NEW:'New',PREPARING:'Preparing',READY:'Ready',SERVED:'Served',BILL_REQUESTED:'Bill Ready',PAID:'Paid',CANCELLED:'Cancelled'};
 const ITEM_STATUS={NEW:'Pending',PREPARING:'Preparing',READY:'Ready',SERVED:'Served',CANCELLED:'Cancelled'};
-const beep=()=>{try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=880;o.type='sine';g.gain.setValueAtTime(.0001,c.currentTime);g.gain.exponentialRampToValueAtTime(.18,c.currentTime+.01);g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+.28);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.3)}catch{}};
+const beep=(existingCtx=null)=>{
+ try{
+  const C=window.AudioContext||window.webkitAudioContext;
+  if(!C)return;
+  const c=existingCtx||new C();
+  if(c.state==='suspended')c.resume();
+  const o=c.createOscillator(),g=c.createGain();
+  o.frequency.value=880;o.type='sine';
+  g.gain.setValueAtTime(.0001,c.currentTime);
+  g.gain.exponentialRampToValueAtTime(.18,c.currentTime+.01);
+  g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+.28);
+  o.connect(g);g.connect(c.destination);
+  o.start();o.stop(c.currentTime+.3);
+ }catch{}
+};
 
 function fmtDateTime(v){return v?new Date(v).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):''}
 function fmtDate(v){return v?new Date(v).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):''}
@@ -34,11 +48,28 @@ function App(){
  const[session,setSession]=useState(null),[profile,setProfile]=useState(null),[loading,setLoading]=useState(true),[page,setPage]=useState('dashboard'),[msg,setMsg]=useState('');
  const[orders,setOrders]=useState([]),[menu,setMenu]=useState([]),[employees,setEmployees]=useState([]),[attendance,setAttendance]=useState([]),[expenses,setExpenses]=useState([]),[salaryPayments,setSalaryPayments]=useState([]),[advances,setAdvances]=useState([]);
  const[table,setTable]=useState(null),[chairs,setChairs]=useState([]),[cart,setCart]=useState([]),[loginRole,setLoginRole]=useState('waiter'),[tableResetNotice,setTableResetNotice]=useState('');
- const previousOrderIds=React.useRef(new Set()),previousItemStates=React.useRef(new Map()),liveReady=React.useRef(false);
+ const previousOrderIds=React.useRef(null),previousItemStates=React.useRef(null),liveReady=React.useRef(false);
+ const audioCtx=React.useRef(null);
+ const[soundEnabled,setSoundEnabled]=useState(false);
  const[dark,setDark]=useState(()=>localStorage.getItem('brottta-theme')==='dark');
  const role=profile?.role;
  const nav=useMemo(()=>role==='waiter'?[['pos','Take Order'],['ready','Ready Orders'],['orders','Table History']]:role==='chef'?[['kitchen','Kitchen'],['orders','Orders']]:role==='cashier'?[['billing','Bills'],['orders','Orders'],['analytics','Sales']]:[['dashboard','Dashboard'],['pos','Take Order'],['kitchen','Kitchen'],['billing','Bills'],['orders','Table History'],['menu','Food Items'],['employees','Employees'],['attendance','Attendance'],['expenses','Expenses'],['analytics','Analytics']],[role]);
  useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light';localStorage.setItem('brottta-theme',dark?'dark':'light')},[dark]);
+ useEffect(()=>{
+   if(!session || !(role==='chef'||role==='waiter')) return;
+   const arm=()=>{
+     try{
+       const C=window.AudioContext||window.webkitAudioContext;
+       if(!C)return;
+       if(!audioCtx.current) audioCtx.current=new C();
+       audioCtx.current.resume();
+     }catch{}
+     window.removeEventListener('pointerdown',arm);
+   };
+   window.addEventListener('pointerdown',arm,{once:true});
+   return()=>window.removeEventListener('pointerdown',arm);
+ },[session,role]);
+
 
  useEffect(()=>{let live=true;
    supabase.auth.getSession().then(async({data})=>{if(!live)return;if(data.session){setSession(data.session);await getProfile(data.session.user.id)}setLoading(false)});
@@ -48,21 +79,70 @@ function App(){
 
  useEffect(()=>{if(session&&profile)loadAll()},[session,profile]);
  useEffect(()=>{if(!session)return;
-   const handle=payload=>{
-     const isInsert=payload.eventType==='INSERT';
-     const n=payload.new||{};
-     if(role==='chef'&&isInsert&&payload.table==='orders')beep();
-     if(role==='waiter'&&payload.table==='order_items'&&payload.eventType==='UPDATE'&&n.status==='READY')beep();
-     loadOrders();
-   };
+   const handle=payload=>{ loadOrders(); };
    const c=supabase.channel('brottta-live')
     .on('postgres_changes',{event:'*',schema:'public',table:'orders'},handle)
     .on('postgres_changes',{event:'*',schema:'public',table:'order_items'},handle)
     .on('postgres_changes',{event:'*',schema:'public',table:'table_sessions'},handle)
     .subscribe();
-   const timer=setInterval(loadOrders,5000);
+
+   // Realtime is used for instant refresh, while polling detects notifications
+   // reliably even when a browser misses a realtime event.
+   const checkNotifications=async()=>{
+     const{data,error}=await supabase.from('orders').select('id,created_at,status,order_items(id,status)').order('created_at',{ascending:false});
+     if(error)return;
+     const list=data||[];
+     const orderIds=new Set(list.map(o=>o.id));
+     const itemStates=new Map();
+     list.forEach(o=>(o.order_items||[]).forEach(i=>itemStates.set(i.id,i.status)));
+
+     if(previousOrderIds.current===null){
+       previousOrderIds.current=orderIds;
+       previousItemStates.current=itemStates;
+       liveReady.current=true;
+       return;
+     }
+
+     if(soundEnabled){
+       if(role==='chef'){
+         const newOrders=list.filter(o=>!previousOrderIds.current.has(o.id) && o.status!=='PAID' && o.status!=='CANCELLED');
+         if(newOrders.length) beep(audioCtx.current);
+       }
+       if(role==='waiter'){
+         let readyChanged=false;
+         itemStates.forEach((status,id)=>{
+           if(status==='READY' && previousItemStates.current.get(id)!=='READY') readyChanged=true;
+         });
+         if(readyChanged) beep(audioCtx.current);
+       }
+     }
+
+     previousOrderIds.current=orderIds;
+     previousItemStates.current=itemStates;
+     loadOrders();
+   };
+
+   checkNotifications();
+   const timer=setInterval(checkNotifications,3000);
    return()=>{clearInterval(timer);supabase.removeChannel(c)}
- },[session,role]);
+ },[session,role,soundEnabled]);
+
+
+ function enableSound(){
+   try{
+     const C=window.AudioContext||window.webkitAudioContext;
+     if(!C){setMsg('This browser does not support sound notifications.');return}
+     const ctx=audioCtx.current||new C();
+     audioCtx.current=ctx;
+     const resume=ctx.resume?ctx.resume():Promise.resolve();
+     Promise.resolve(resume).then(()=>{
+       setSoundEnabled(true);
+       localStorage.setItem('brottta-sound-enabled','1');
+       beep(ctx);
+       setMsg('🔔 Sound enabled. You heard the test beep.');
+     }).catch(()=>setMsg('Click Enable Sound again and allow browser audio.'));
+   }catch(e){setMsg('Unable to enable sound notifications.')}
+ }
 
  async function getProfile(id){
    const{data,error}=await supabase.from('profiles').select('*').eq('id',id).single();
@@ -107,17 +187,20 @@ function App(){
    if(e){await supabase.from('orders').delete().eq('id',o.id);return setMsg(e.message)}
    setCart([]);await loadOrders();setMsg(`Table ${table} ${seatLabel}: order sent to kitchen.`)
  }
- async function closeTable(tableNo){
-   const open=orders.filter(o=>Number(o.table_no)===Number(tableNo)&&o.status!=='PAID'&&o.status!=='CANCELLED');
-   if(!open.length)return setMsg('No open orders for this table.');
-   const sessionId=open[0].session_id;
-   const combined=open.reduce((s,o)=>s+total(o),0);
-   const{error}=await supabase.from('table_sessions').update({status:'CLOSED',closed_at:new Date().toISOString(),closed_by:session.user.id,total:combined}).eq('id',sessionId);
+ async function billSelectedOrders(orderIds){
+   if(!orderIds?.length)return setMsg('Select at least one order to send for billing.');
+   const selected=orders.filter(o=>orderIds.includes(o.id)&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
+   if(!selected.length)return setMsg('Selected orders are already billed or closed.');
+   const sessionId=selected[0].session_id;
+   const{error}=await supabase.from('orders').update({status:'BILL_REQUESTED'}).in('id',selected.map(o=>o.id));
    if(error){setMsg(error.message);return}
-   const{error:e}=await supabase.from('orders').update({status:'BILL_REQUESTED'}).eq('session_id',sessionId).neq('status','PAID');
-   if(e){setMsg(e.message);return}
    await loadOrders();
-   setMsg(`Table ${tableNo} closed. Bill ${money(combined)} sent to cashier.`)
+   setMsg(`${selected.length} selected order${selected.length>1?'s':''} sent to cashier for ${money(selected.reduce((s,o)=>s+total(o),0))}.`);
+ }
+ async function closeTable(tableNo,selectedIds=null){
+   const open=orders.filter(o=>Number(o.table_no)===Number(tableNo)&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
+   if(!open.length)return setMsg('No unbilled orders for this table.');
+   await billSelectedOrders(selectedIds?.length?selectedIds:open.map(o=>o.id));
  }
  async function syncOrderStatus(orderId){
    const{data:items}=await supabase.from('order_items').select('status').eq('order_id',orderId);
@@ -146,17 +229,22 @@ function App(){
    await loadOrders();setMsg(`${item.item_name} removed from the order.`);
  }
  async function updateStatus(id,status){await supabase.from('orders').update({status}).eq('id',id);await loadOrders()}
- async function payTable(sessionId){
-   const group=orders.filter(o=>o.session_id===sessionId&&o.status!=='PAID'&&o.status!=='CANCELLED');
-   if(!group.length)return;
+ async function payTable(sessionId,paymentMethod){
+   if(!['CASH','ONLINE'].includes(paymentMethod))return setMsg('Select Cash or Online Payment.');
+   const group=orders.filter(o=>o.session_id===sessionId&&o.status==='BILL_REQUESTED');
+   if(!group.length)return setMsg('No bill-ready orders for this table.');
    const amount=group.reduce((s,o)=>s+total(o),0);
-   const{error}=await supabase.from('orders').update({status:'PAID',paid_at:new Date().toISOString()}).eq('session_id',sessionId).neq('status','PAID');
+   const paidAt=new Date().toISOString();
+   const{error}=await supabase.from('orders').update({status:'PAID',paid_at:paidAt,payment_method:paymentMethod}).in('id',group.map(o=>o.id));
    if(error){setMsg(error.message);return}
-   const{error:e}=await supabase.from('table_sessions').update({status:'PAID',paid_at:new Date().toISOString()}).eq('id',sessionId);
-   if(e){setMsg(e.message);return}
+   const remaining=orders.filter(o=>o.session_id===sessionId&&!['PAID','CANCELLED'].includes(o.status)&&!group.some(g=>g.id===o.id));
+   if(!remaining.length){
+     const{error:e}=await supabase.from('table_sessions').update({status:'PAID',paid_at:paidAt}).eq('id',sessionId);
+     if(e){setMsg(e.message);return}
+     setTableResetNotice(`Table ${group[0].table_no} is now reset and available for a new order.`);
+   }
    await loadOrders();
-   setTableResetNotice(`Table ${group[0].table_no} is now reset and available for a new order.`);
-   setMsg(`Table ${group[0].table_no} paid. Bill total ${money(amount)}. The table is now available again.`)
+   setMsg(`Bill ${money(amount)} paid by ${paymentMethod==='CASH'?'Cash':'Online Payment'}.`);
  }
  function addItem(i){setCart(c=>{const x=c.find(a=>a.id===i.id);return x?c.map(a=>a.id===i.id?{...a,qty:a.qty+1}:a):[...c,{...i,qty:1}]})}
  function qty(id,n){setCart(c=>c.map(x=>x.id===id?{...x,qty:x.qty+n}:x).filter(x=>x.qty>0))}
@@ -216,7 +304,7 @@ function App(){
  if(loading)return <div className="splash">Loading Brottta POS...</div>;
  if(!session||!profile)return <Login role={loginRole} setRole={setLoginRole} login={login} msg={msg}/>;
  return <div className="app">
-   <header><b>🍽️ BROTTTA <small>Restaurant POS</small></b><div><button className="themeBtn" onClick={()=>setDark(x=>!x)}>{dark?'☀️ Light':'🌙 Dark'}</button><span className="pill">{ROLES[role]}</span> {profile.full_name||session.user.email} <button className="ghost" onClick={()=>supabase.auth.signOut()}>Logout</button></div></header>
+   <header><b>🍽️ BROTTTA <small>Restaurant POS</small></b><div>{(role==='chef'||role==='waiter')&&<button className={soundEnabled?'soundBtn enabled':'soundBtn'} onClick={enableSound}>{soundEnabled?'🔔 Sound On':'🔕 Enable Sound'}</button>}<button className="themeBtn" onClick={()=>setDark(x=>!x)}>{dark?'☀️ Light':'🌙 Dark'}</button><span className="pill">{ROLES[role]}</span> {profile.full_name||session.user.email} <button className="ghost" onClick={()=>supabase.auth.signOut()}>Logout</button></div></header>
    <div className="layout"><aside>{nav.map(([id,n])=><button key={id} className={page===id?'active':''} onClick={()=>setPage(id)}>{n}</button>)}</aside>
    <main>{msg&&<div className="toast">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
      {page==='dashboard'&&<Dashboard orders={orders} menu={menu} employees={employees}/>}
@@ -288,26 +376,193 @@ function POS({menu,table,setTable,chairs,setChairs,cart,addItem,qty,createOrder,
 }
 
 function TableOpenHistory({orders,table,total:grand,closeTable,deleteItem,updateItem}){
+ const [selected,setSelected]=useState([]);
+ const available=orders.filter(o=>!['BILL_REQUESTED','PAID','CANCELLED'].includes(o.status));
+ const toggle=id=>setSelected(x=>x.includes(id)?x.filter(v=>v!==id):[...x,id]);
+ const selectedTotal=orders.filter(o=>selected.includes(o.id)).reduce((s,o)=>s+total(o),0);
+ useEffect(()=>{setSelected(x=>x.filter(id=>available.some(o=>o.id===id)))},[orders.length]);
  return <Panel t={`TABLE ${table} — OPEN HISTORY`}>
-   {orders.length===0?<div className="empty">No previous orders for this table.</div>:orders.map((o,i)=><div className="ticket" key={o.id}><div className="ticketHead"><b>Order #{i+1}</b><span>{seatLabel(o)}</span><span className={`status ${String(o.status).toLowerCase()}`}>{STATUS[o.status]}</span><small>{dt(o.created_at)}</small></div>{(o.order_items||[]).map(it=><ItemRow key={it.id} item={it} canDelete={!['BILL_REQUESTED','PAID','CANCELLED'].includes(o.status)} onDelete={deleteItem}/>) }<div className="ticketTotal">{money(total(o))}</div></div>)}
+   {orders.length===0?<div className="empty">No previous orders for this table.</div>:orders.map((o,i)=><div className={`ticket ${selected.includes(o.id)?'selectedTicket':''}`} key={o.id}>
+     <div className="ticketHead">
+       {available.some(x=>x.id===o.id)&&<label className="billCheck"><input type="checkbox" checked={selected.includes(o.id)} onChange={()=>toggle(o.id)}/><b>Send this order to bill</b></label>}
+       <b>Order #{i+1}</b><span>{seatLabel(o)}</span><span className={`status ${String(o.status).toLowerCase()}`}>{STATUS[o.status]}</span><small>{dt(o.created_at)}</small>
+     </div>
+     {(o.order_items||[]).map(it=><ItemRow key={it.id} item={it} canDelete={!['BILL_REQUESTED','PAID','CANCELLED'].includes(o.status)} onDelete={deleteItem}/>)}
+     <div className="ticketTotal">{money(total(o))}</div>
+   </div>)}
    <div className="grand"><span>TABLE TOTAL</span><b>{money(grand)}</b></div>
-   {orders.length>0&&<button className="bill fullBtn" onClick={()=>closeTable(table)}>🧾 CLOSE TABLE & SEND BILL TO CASHIER</button>}
+   {available.length>0&&<button className="bill fullBtn" disabled={!selected.length} onClick={async()=>{await closeTable(table,selected);setSelected([])}}>🧾 SEND SELECTED TO BILL {selected.length?`— ${money(selectedTotal)}`:''}</button>}
+   {selected.length===0&&available.length>0&&<small className="hint">Tick only the chair/group order you want to bill. Other orders remain open.</small>}
  </Panel>
 }
-
 function Ready({orders,update,updateItem}){const x=orders.filter(o=>o.status==='READY'||(o.order_items||[]).some(i=>i.status==='READY'));return <><Title t="🔔 Ready to Serve" s="Green = served/ready, red = not yet served"/><div className="cards">{x.length===0&&<div className="empty panel">No ready items.</div>}{x.map(o=><div className="card" key={o.id}><div className="cardhead"><h2>TABLE {o.table_no}</h2><span>{seatLabel(o)}</span></div>{(o.order_items||[]).map(i=><ItemRow key={i.id} item={i} canServe={i.status==='READY'} onServe={updateItem}/>)}</div>)}</div></>}
 
-function Kitchen({orders,updateItem}){const x=orders.filter(o=>!['SERVED','PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));return <><Title t="Kitchen" s="Update each food item independently. New tickets trigger a sound."/><div className="cards">{x.length===0&&<div className="empty panel">No pending items.</div>}{x.map(o=><div className="card" key={o.id}><div className="cardhead"><h2>TABLE {o.table_no}</h2><span>{seatLabel(o)}</span></div><small>{dt(o.created_at)}</small>{(o.order_items||[]).map(i=><div className="kitchenItem" key={i.id}><div><b>{i.qty} × {i.item_name}</b><small>{ITEM_STATUS[i.status||'NEW']}</small></div><div className="actions mini">{(i.status||'NEW')==='NEW'&&<><button className="primary" onClick={()=>updateItem(i.id,'PREPARING')}>Preparing</button><button className="success" onClick={()=>updateItem(i.id,'READY')}>✓ Ready Now</button></>}{i.status==='PREPARING'&&<button className="success" onClick={()=>updateItem(i.id,'READY')}>✓ Ready</button>}{i.status==='READY'&&<button className="success" onClick={()=>updateItem(i.id,'SERVED')}>✓ Served</button>}</div></div>)}</div>)}</div></>}
-
+function Kitchen({orders,updateItem}){
+  const x=orders.filter(o=>!['SERVED','PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
+  return (
+    <div>
+      <Title t="Kitchen" s="Update each food item independently. New tickets trigger a sound." />
+      <div className="cards">
+        {x.length===0 && <div className="empty panel">No pending items.</div>}
+        {x.map(o => (
+          <div className="card" key={o.id}>
+            <div className="cardhead"><h2>TABLE {o.table_no}</h2><span>{seatLabel(o)}</span></div>
+            <small>{dt(o.created_at)}</small>
+            {(o.order_items||[]).map(i => (
+              <div className="kitchenItem" key={i.id}>
+                <div><b>{i.qty} × {i.item_name}</b><small>{ITEM_STATUS[i.status||'NEW']}</small></div>
+                <div className="actions mini">
+                  {(i.status||'NEW')==='NEW' && (<><button className="primary" onClick={()=>updateItem(i.id,'PREPARING')}>Preparing</button><button className="success" onClick={()=>updateItem(i.id,'READY')}>✓ Ready Now</button></>)}
+                  {i.status==='PREPARING' && <button className="success" onClick={()=>updateItem(i.id,'READY')}>✓ Ready</button>}
+                  {i.status==='READY' && <button className="success" onClick={()=>updateItem(i.id,'SERVED')}>✓ Served</button>}
+                  {i.status==='SERVED' && <span className="badge green">SERVED</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 function Billing({orders,pay}){
- const groups=Object.values(orders.filter(o=>o.status==='BILL_REQUESTED').reduce((a,o)=>{(a[o.session_id]??=[]).push(o);return a},{}));
- return <><Title t="Billing" s="Closed tables waiting for payment"/><div className="cards">{groups.length===0&&<div className="empty panel">No bills waiting. When a waiter closes a table, the complete bill appears here.</div>}{groups.map(g=>{const grand=g.reduce((s,o)=>s+total(o),0);return <div className="card" key={g[0].session_id}><div className="cardhead"><h2>TABLE {g[0].table_no}</h2><span className="status">BILL READY</span></div>{g.map((o,i)=><div className="ticket" key={o.id}><b>Order #{i+1}</b>{(o.order_items||[]).map(i=><div className="line" key={i.id}><span>{i.item_name} × {i.qty}</span><b>{money(i.line_total)}</b></div>)}</div>)}<div className="grand"><span>TOTAL BILL</span><b>{money(grand)}</b></div><button className="success full" onClick={()=>pay(g[0].session_id)}>✓ COLLECT PAYMENT — {money(grand)}</button></div>})}</div></>
+ const [openPay,setOpenPay]=useState(null),[expandedHistory,setExpandedHistory]=useState({});
+ const activeBills=Object.values(
+   orders.filter(o=>o.status==='BILL_REQUESTED')
+     .reduce((a,o)=>{
+       const k=o.session_id||`single-${o.id}`;
+       (a[k]??=[]).push(o);
+       return a;
+     },{})
+ );
+ const history=orders
+   .filter(o=>o.status==='PAID')
+   .sort((a,b)=>new Date(b.paid_at||b.created_at)-new Date(a.paid_at||a.created_at));
+
+ return <div>
+  <Title t="Billing" s="Active bills waiting for payment"/>
+  <div className="cards">
+   {activeBills.length===0&&<div className="empty panel">No active bills waiting for payment.</div>}
+   {activeBills.map(g=>{
+     const grand=g.reduce((s,o)=>s+total(o),0);
+     const sid=g[0].session_id||`single-${g[0].id}`;
+     return <div className="card" key={sid}>
+      <div className="cardhead">
+       <h2>TABLE {g[0].table_no}</h2>
+       <span className="status">BILL READY</span>
+      </div>
+
+      {g.map((o,i)=><div className="ticket" key={o.id}>
+       <div className="ticketHead">
+        <b>Order #{i+1}</b>
+        <span>{seatLabel(o)}</span>
+        <small>{dt(o.created_at)}</small>
+       </div>
+       {(o.order_items||[]).map(it=>
+        <div className="line" key={it.id}>
+         <span>{it.item_name} × {it.qty}</span>
+         <b>{money(it.line_total)}</b>
+        </div>
+       )}
+      </div>)}
+
+      <div className="grand">
+       <span>TOTAL BILL</span>
+       <b>{money(grand)}</b>
+      </div>
+
+      {openPay===sid?
+       <div className="paymentChooser">
+        <div className="paymentTitle">Select payment method</div>
+        <div className="paymentButtons">
+         <button className="success paymentBtn" onClick={()=>{pay(sid,'CASH');setOpenPay(null)}}>💵 CASH</button>
+         <button className="primary paymentBtn" onClick={()=>{pay(sid,'ONLINE');setOpenPay(null)}}>📱 ONLINE PAYMENT</button>
+        </div>
+        <button className="ghost full" onClick={()=>setOpenPay(null)}>Cancel</button>
+       </div>
+       :
+       <button className="success full" onClick={()=>setOpenPay(sid)}>
+        ✓ COLLECT PAYMENT — {money(grand)}
+       </button>
+      }
+     </div>
+   })}
+  </div>
+
+  <div className="sectionTitle" style={{marginTop:24}}>
+   <div>
+    <h2>Billing History</h2>
+    <p className="muted">Recently paid bills with amount and payment mode</p>
+   </div>
+  </div>
+
+  <Panel>
+   {history.length===0 ? (
+    <div className="empty">No paid bills yet.</div>
+   ) : (
+    <div className="tablewrap">
+     <table>
+      <thead>
+       <tr>
+        <th>Date & Time</th>
+        <th>Table</th>
+        <th>Order / Group</th>
+        <th>Bill Amount</th>
+        <th>Payment Mode</th>
+        <th>Status</th>
+       </tr>
+      </thead>
+      <tbody>
+       {history.map(o=><React.Fragment key={o.id}>
+        <tr className="historyRow" onClick={()=>setExpandedHistory(x=>({...x,[o.id]:!x[o.id]}))} style={{cursor:'pointer'}}>
+         <td>{expandedHistory[o.id]?'▼':'▶'} {fmtDateTime(o.paid_at||o.created_at)}</td>
+         <td>Table {o.table_no}</td>
+         <td>{seatLabel(o)}</td>
+         <td><b>{money(total(o))}</b></td>
+         <td><span className="status">{paymentBadge(o.payment_method)}</span></td>
+         <td><span className="badge green">PAID</span></td>
+        </tr>
+        {expandedHistory[o.id]&&<tr className="historyDetails">
+         <td colSpan="6">
+          <div className="historyItems">
+           <div className="historyItemsTitle">Bill Items</div>
+           {(o.order_items||[]).map(it=><div className="historyItem" key={it.id}>
+            <span>{it.item_name} × {it.qty}</span>
+            <span>{money(it.line_total)}</span>
+           </div>)}
+           <div className="historyTotal"><span>Total</span><b>{money(total(o))}</b></div>
+           <div className="historyMeta">
+            <span>Payment: <b>{paymentBadge(o.payment_method)}</b></span>
+            <span>Paid: {fmtDateTime(o.paid_at||o.created_at)}</span>
+           </div>
+          </div>
+         </td>
+        </tr>}
+       </React.Fragment>)}
+      </tbody>
+     </table>
+    </div>
+   )}
+  </Panel>
+ </div>
 }
 
+
 function TableHistory({orders,pay,role,updateItem,deleteItem}){
+ const [openPay,setOpenPay]=useState(null);
  const active=orders.filter(o=>!['PAID','CANCELLED'].includes(o.status));
  const groups=Object.values(active.reduce((a,o)=>{const k=o.session_id||`single-${o.id}`;(a[k]??=[]).push(o);return a},{}));
- return <><Title t="Table History" s="Open tables stay visible until billed. Green items are served; red items are pending."/><div className="cards">{groups.length===0&&<div className="empty panel">No open table orders.</div>}{groups.map(g=>{const grand=g.reduce((s,o)=>s+total(o),0);return <div className="card" key={g[0].session_id||g[0].id}><div className="cardhead"><h2>TABLE {g[0].table_no}</h2><span className="status">{g.every(o=>o.status==='SERVED')?'ALL SERVED':'OPEN'}</span></div>{g.map((o,i)=><div className="ticket" key={o.id}><div className="ticketHead"><b>Order #{i+1}</b><span>{seatLabel(o)}</span><small>{dt(o.created_at)}</small></div>{(o.order_items||[]).map(it=><ItemRow key={it.id} item={it} canServe={role==='waiter'&&it.status==='READY'} onServe={updateItem} canDelete={role==='waiter'&&!['BILL_REQUESTED','PAID','CANCELLED'].includes(o.status)} onDelete={deleteItem}/>)}</div>)}<div className="grand"><span>OPEN TABLE TOTAL</span><b>{money(grand)}</b></div>{role==='waiter'&&<small className="hint">Add another ticket anytime. Close the table only when the customer is done.</small>}{role==='cashier'&&g.every(o=>o.status==='BILL_REQUESTED')&&<button className="success full" onClick={()=>pay(g[0].session_id)}>COLLECT {money(grand)}</button>}</div>})}</div></>
+ return <><Title t="Table History" s="Open tables stay visible until billed. Green items are served; red items are pending."/><div className="cards">
+ {groups.length===0&&<div className="empty panel">No open table orders.</div>}
+ {groups.map(g=>{const grand=g.reduce((s,o)=>s+total(o),0);const sid=g[0].session_id;return <div className="card" key={sid||g[0].id}>
+  <div className="cardhead"><h2>TABLE {g[0].table_no}</h2><span className="status">{g.every(o=>o.status==='SERVED')?'ALL SERVED':'OPEN'}</span></div>
+  {g.map((o,i)=><div className="ticket" key={o.id}><div className="ticketHead"><b>Order #{i+1}</b><span>{seatLabel(o)}</span><small>{dt(o.created_at)}</small></div>{(o.order_items||[]).map(it=><ItemRow key={it.id} item={it} canServe={role==='waiter'&&it.status==='READY'} onServe={updateItem} canDelete={role==='waiter'&&!['BILL_REQUESTED','PAID','CANCELLED'].includes(o.status)} onDelete={deleteItem}/>)}</div>)}
+  <div className="grand"><span>OPEN TABLE TOTAL</span><b>{money(grand)}</b></div>
+  {role==='waiter'&&<small className="hint">Add another ticket anytime. Close the table only when the customer is done.</small>}
+  {role==='cashier'&&g.every(o=>o.status==='BILL_REQUESTED')&&(openPay===sid?
+    <div className="paymentChooser"><div className="paymentTitle">Select payment method</div><div className="paymentButtons"><button className="success paymentBtn" onClick={()=>{pay(sid,'CASH');setOpenPay(null)}}>💵 CASH</button><button className="primary paymentBtn" onClick={()=>{pay(sid,'ONLINE');setOpenPay(null)}}>📱 ONLINE PAYMENT</button></div><button className="ghost full" onClick={()=>setOpenPay(null)}>Cancel</button></div>
+    :<button className="success full" onClick={()=>setOpenPay(sid)}>COLLECT {money(grand)}</button>)}
+ </div>})}</div></>
 }
 
 function SimpleOrders({orders}){return <div className="tablewrap"><table><thead><tr><th>Table</th><th>Items</th><th>Total</th><th>Status</th><th>Time</th></tr></thead><tbody>{orders.map(o=><tr key={o.id}><td>Table {o.table_no}</td><td>{(o.order_items||[]).map(i=>`${i.item_name} ×${i.qty}`).join(', ')}</td><td>{money(total(o))}</td><td><span className="status">{STATUS[o.status]}</span></td><td>{dt(o.created_at)}</td></tr>)}</tbody></table></div>}

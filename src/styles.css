@@ -68,3 +68,28 @@ table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px s
 @media(max-width:900px){.employeeSummaryGrid,.attendanceGrid{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.employeeSummaryGrid,.attendanceGrid{grid-template-columns:1fr}.exportBar{justify-content:flex-start;flex-wrap:wrap}}
 .salaryPeriodBox{display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid var(--border);border-radius:10px;margin:10px 0 14px}.salaryPeriodBox span{font-size:16px;font-weight:800}.salaryPeriodBox small{opacity:.7}.paidBox{padding:12px;border-radius:10px;margin-top:12px;font-weight:800;background:#dcfce7;color:#166534}.paidBadge{display:inline-block;margin-left:8px;white-space:nowrap}
+
+
+.soundBtn{border:1px solid #4b5563;border-radius:10px;padding:9px 12px;background:transparent;color:inherit;cursor:pointer;font-weight:700}
+.soundBtn.enabled{border-color:#22c55e;background:rgba(34,197,94,.12)}
+.paymentChooser{margin-top:14px;padding:14px;border:1px solid rgba(127,127,127,.25);border-radius:14px}
+.paymentTitle{font-weight:800;margin-bottom:10px}
+.paymentButtons{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.paymentBtn{min-height:48px;font-weight:800}
+@media(max-width:650px){.paymentButtons{grid-template-columns:1fr}}
+
+.soundBtn{font-weight:700}
+.soundBtn.enabled{border-color:#22c55e}
+
+.billCheck{display:flex;align-items:center;gap:8px;cursor:pointer}.billCheck input{width:18px;height:18px}.selectedTicket{border:2px solid var(--accent,#22c55e)}
+button:disabled{opacity:.5;cursor:not-allowed}
+
+.sectionTitle{display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px}.sectionTitle h2{margin:0}.muted{opacity:.7}.badge.green{color:#fff;background:#168a45;padding:4px 8px;border-radius:999px}
+
+.historyRow:hover{filter:brightness(.98)}
+.historyDetails td{padding:0!important}
+.historyItems{padding:14px 18px;margin:0 8px 10px;border-radius:10px;border:1px solid rgba(128,128,128,.22)}
+.historyItemsTitle{font-weight:700;margin-bottom:10px}
+.historyItem{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(128,128,128,.16)}
+.historyTotal{display:flex;justify-content:space-between;padding-top:10px;margin-top:4px}
+.historyMeta{display:flex;gap:24px;flex-wrap:wrap;margin-top:10px;font-size:13px;opacity:.8}
