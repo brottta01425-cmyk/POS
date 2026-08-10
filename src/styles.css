@@ -93,3 +93,15 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .historyItem{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(128,128,128,.16)}
 .historyTotal{display:flex;justify-content:space-between;padding-top:10px;margin-top:4px}
 .historyMeta{display:flex;gap:24px;flex-wrap:wrap;margin-top:10px;font-size:13px;opacity:.8}
+
+/* Dine-in / takeaway split */
+.billingSplit,.kitchenSplit{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.orderTypeBadge{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700;background:rgba(80,120,200,.12)}
+.statGroup{border:1px solid rgba(128,128,128,.2);border-radius:14px;padding:14px;margin:14px 0}
+.statGroup.dine{border-left:5px solid #4b78d1}
+.statGroup.takeaway{border-left:5px solid #d58a30}
+.statGroup h2{margin:0 0 10px}
+.splitStats{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.takeawayCreator .foods{max-height:280px;overflow:auto}
+.kitchenSplit>section,.billingSplit>section{min-width:0}
+@media(max-width:900px){.billingSplit,.kitchenSplit,.splitStats{grid-template-columns:1fr}}

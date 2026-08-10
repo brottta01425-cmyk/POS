@@ -8,6 +8,9 @@ const ROLES={admin:'Admin',waiter:'Waiter',chef:'Chef',cashier:'Cashier'};
 const TABLES=Array.from({length:20},(_,i)=>i+1);
 const STATUS={NEW:'New',PREPARING:'Preparing',READY:'Ready',SERVED:'Served',BILL_REQUESTED:'Bill Ready',PAID:'Paid',CANCELLED:'Cancelled'};
 const ITEM_STATUS={NEW:'Pending',PREPARING:'Preparing',READY:'Ready',SERVED:'Served',CANCELLED:'Cancelled'};
+const ORDER_TYPES={DINE_IN:'🍽️ DINE IN',TAKEAWAY:'🥡 TAKEAWAY / PARCEL'};
+const orderType=o=>o?.order_type==='TAKEAWAY'?'TAKEAWAY':'DINE_IN';
+const orderTypeLabel=o=>ORDER_TYPES[orderType(o)];
 const beep=(existingCtx=null)=>{
  try{
   const C=window.AudioContext||window.webkitAudioContext;
@@ -47,7 +50,7 @@ const total=o=>Number(o?.total||0);
 function App(){
  const[session,setSession]=useState(null),[profile,setProfile]=useState(null),[loading,setLoading]=useState(true),[page,setPage]=useState('dashboard'),[msg,setMsg]=useState('');
  const[orders,setOrders]=useState([]),[menu,setMenu]=useState([]),[employees,setEmployees]=useState([]),[attendance,setAttendance]=useState([]),[expenses,setExpenses]=useState([]),[salaryPayments,setSalaryPayments]=useState([]),[advances,setAdvances]=useState([]);
- const[table,setTable]=useState(null),[chairs,setChairs]=useState([]),[cart,setCart]=useState([]),[loginRole,setLoginRole]=useState('waiter'),[tableResetNotice,setTableResetNotice]=useState('');
+ const[table,setTable]=useState(null),[chairs,setChairs]=useState([]),[cart,setCart]=useState([]),[takeawayCart,setTakeawayCart]=useState([]),[loginRole,setLoginRole]=useState('waiter'),[tableResetNotice,setTableResetNotice]=useState('');
  const previousOrderIds=React.useRef(null),previousItemStates=React.useRef(null),liveReady=React.useRef(false);
  const audioCtx=React.useRef(null);
  const[soundEnabled,setSoundEnabled]=useState(false);
@@ -187,6 +190,43 @@ function App(){
    if(e){await supabase.from('orders').delete().eq('id',o.id);return setMsg(e.message)}
    setCart([]);await loadOrders();setMsg(`Table ${table} ${seatLabel}: order sent to kitchen.`)
  }
+ async function createTakeawayOrder(customerName='',customerPhone=''){
+   if(!takeawayCart.length){setMsg('Add food items to the takeaway order.');return null}
+   const ttotal=takeawayCart.reduce((s,x)=>s+Number(x.price)*x.qty,0);
+   const{data:o,error}=await supabase.from('orders').insert({
+     order_type:'TAKEAWAY',
+     table_no:null,
+     session_id:null,
+     status:'NEW',
+     total:ttotal,
+     created_by:session.user.id,
+     seat_label:'TAKEAWAY',
+     chairs:[],
+     customer_name:customerName||null,
+     customer_phone:customerPhone||null
+   }).select().single();
+   if(error){setMsg(error.message);return null}
+   const{error:e}=await supabase.from('order_items').insert(takeawayCart.map(x=>({
+     order_id:o.id,menu_item_id:x.id,item_name:x.name,unit_price:Number(x.price),qty:x.qty,
+     line_total:Number(x.price)*x.qty,status:'NEW'
+   })));
+   if(e){await supabase.from('orders').delete().eq('id',o.id);setMsg(e.message);return null}
+   setTakeawayCart([]);await loadOrders();setMsg(`Takeaway ${o.id.slice(0,6).toUpperCase()} sent to kitchen.`);return o;
+ }
+ async function sendTakeawayToBilling(orderId){
+   const o=orders.find(x=>x.id===orderId);
+   if(!o||orderType(o)!=='TAKEAWAY')return;
+   if(o.status==='PAID'||o.status==='CANCELLED')return;
+   const{error}=await supabase.from('orders').update({status:'BILL_REQUESTED'}).eq('id',orderId);
+   if(error)setMsg(error.message);else{await loadOrders();setMsg(`Takeaway bill ${money(total(o))} is ready for collection.`)}
+ }
+ async function paySingleOrder(orderId,paymentMethod){
+   if(!['CASH','ONLINE'].includes(paymentMethod))return setMsg('Select Cash or Online Payment.');
+   const o=orders.find(x=>x.id===orderId);
+   if(!o)return;
+   const{error}=await supabase.from('orders').update({status:'PAID',paid_at:new Date().toISOString(),payment_method:paymentMethod}).eq('id',orderId);
+   if(error)setMsg(error.message);else{await loadOrders();setMsg(`Bill ${money(total(o))} paid by ${paymentMethod==='CASH'?'Cash':'Online Payment'}.`)}
+ }
  async function billSelectedOrders(orderIds){
    if(!orderIds?.length)return setMsg('Select at least one order to send for billing.');
    const selected=orders.filter(o=>orderIds.includes(o.id)&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
@@ -248,6 +288,8 @@ function App(){
  }
  function addItem(i){setCart(c=>{const x=c.find(a=>a.id===i.id);return x?c.map(a=>a.id===i.id?{...a,qty:a.qty+1}:a):[...c,{...i,qty:1}]})}
  function qty(id,n){setCart(c=>c.map(x=>x.id===id?{...x,qty:x.qty+n}:x).filter(x=>x.qty>0))}
+ function addTakeawayItem(i){setTakeawayCart(c=>{const x=c.find(a=>a.id===i.id);return x?c.map(a=>a.id===i.id?{...a,qty:a.qty+1}:a):[...c,{...i,qty:1}]})}
+ function takeawayQty(id,n){setTakeawayCart(c=>c.map(x=>x.id===id?{...x,qty:x.qty+n}:x).filter(x=>x.qty>0))}
  async function saveMenu(item){
    const payload={name:item.name.trim(),price:Number(item.price),category:item.category.trim()||'Other',cost_price:Number(item.cost_price||0),available:item.available!==false};
    if(!payload.name||payload.price<=0)return setMsg('Food name and selling price are required.');
@@ -311,7 +353,7 @@ function App(){
      {page==='pos'&&<POS menu={menu} table={table} setTable={setTable} chairs={chairs} setChairs={setChairs} cart={cart} addItem={addItem} qty={qty} createOrder={createOrder} orders={orders} closeTable={closeTable} resetNotice={tableResetNotice} deleteItem={deleteOrderItem} updateItem={updateItemStatus}/>}
      {page==='ready'&&<Ready orders={orders} update={updateStatus} updateItem={updateItemStatus}/>}
      {page==='kitchen'&&<Kitchen orders={orders} update={updateStatus} updateItem={updateItemStatus}/>}
-     {page==='billing'&&<Billing orders={orders} pay={payTable}/>}
+     {page==='billing'&&<Billing orders={orders} menu={menu} pay={payTable} paySingle={paySingleOrder} takeawayCart={takeawayCart} setTakeawayCart={setTakeawayCart} addItem={addItem} qty={qty} createTakeaway={createTakeawayOrder} sendTakeawayToBilling={sendTakeawayToBilling} addTakeawayItem={addTakeawayItem} takeawayQty={takeawayQty}/>} 
      {page==='orders'&&<TableHistory orders={orders} update={updateStatus} pay={payTable} role={role} updateItem={updateItemStatus} deleteItem={deleteOrderItem}/>}
      {page==='menu'&&<Menu menu={menu} save={saveMenu} del={deleteMenu}/>}
      {page==='employees'&&<Employees data={employees} add={addEmployee} update={updateEmployeePay} addAdvance={addAdvance} advances={advances} payments={salaryPayments} attendance={attendance} paySalary={paySalary}/>}
@@ -337,9 +379,16 @@ function DateRange({from,to,setFrom,setTo}){
 function Dashboard({orders,menu,employees}){
  const [from,setFrom]=useState(today()),[to,setTo]=useState(today());
  const paid=rangeFilterOrders(orders.filter(o=>o.status==='PAID'),from,to);
+ const dine=paid.filter(o=>orderType(o)==='DINE_IN'),take=paid.filter(o=>orderType(o)==='TAKEAWAY');
  const sales=paid.reduce((s,o)=>s+total(o),0),cash=paid.filter(o=>o.payment_method==='CASH').reduce((s,o)=>s+total(o),0),online=paid.filter(o=>o.payment_method==='ONLINE').reduce((s,o)=>s+total(o),0);
  const top={};paid.forEach(o=>(o.order_items||[]).forEach(i=>{top[i.item_name]=(top[i.item_name]||0)+Number(i.qty||0)}));
- return <><Title t="Dashboard" s="Select a date or date range to track restaurant performance"/><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}/><div className="stats"><Stat n="Sales" v={money(sales)}/><Stat n="Cash" v={money(cash)}/><Stat n="Online" v={money(online)}/><Stat n="Paid Bills" v={paid.length}/><Stat n="Food Items" v={menu.length}/><Stat n="Employees" v={employees.length}/></div><Panel t="Top Selling Items">{Object.entries(top).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n,q],i)=><div className="rank" key={n}><span>#{i+1}</span><b>{n}</b><strong>{q} sold</strong></div>)}</Panel></>
+ return <><Title t="Dashboard" s="Select a date or date range to track restaurant performance"/><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}/>
+  <div className="stats"><Stat n="Total Sales" v={money(sales)}/><Stat n="Total Orders" v={paid.length}/><Stat n="Cash" v={money(cash)}/><Stat n="Online" v={money(online)}/></div>
+  <div className="splitStats">
+   <div className="statGroup dine"><h2>🍽️ Dine-In</h2><div className="stats"><Stat n="Sales" v={money(dine.reduce((s,o)=>s+total(o),0))}/><Stat n="Orders" v={dine.length}/></div></div>
+   <div className="statGroup takeaway"><h2>🥡 Takeaway / Parcel</h2><div className="stats"><Stat n="Sales" v={money(take.reduce((s,o)=>s+total(o),0))}/><Stat n="Orders" v={take.length}/></div></div>
+  </div>
+  <Panel t="Top Selling Items">{Object.entries(top).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n,q],i)=><div className="rank" key={n}><span>#{i+1}</span><b>{n}</b><strong>{q} sold</strong></div>)}</Panel></>
 }
 
 function seatLabel(o){return o.seat_label||'ENTIRE TABLE'}
@@ -398,155 +447,77 @@ function TableOpenHistory({orders,table,total:grand,closeTable,deleteItem,update
 function Ready({orders,update,updateItem}){const x=orders.filter(o=>o.status==='READY'||(o.order_items||[]).some(i=>i.status==='READY'));return <><Title t="🔔 Ready to Serve" s="Green = served/ready, red = not yet served"/><div className="cards">{x.length===0&&<div className="empty panel">No ready items.</div>}{x.map(o=><div className="card" key={o.id}><div className="cardhead"><h2>TABLE {o.table_no}</h2><span>{seatLabel(o)}</span></div>{(o.order_items||[]).map(i=><ItemRow key={i.id} item={i} canServe={i.status==='READY'} onServe={updateItem}/>)}</div>)}</div></>}
 
 function Kitchen({orders,updateItem}){
-  const x=orders.filter(o=>!['SERVED','PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
-  return (
-    <div>
-      <Title t="Kitchen" s="Update each food item independently. New tickets trigger a sound." />
-      <div className="cards">
-        {x.length===0 && <div className="empty panel">No pending items.</div>}
-        {x.map(o => (
-          <div className="card" key={o.id}>
-            <div className="cardhead"><h2>TABLE {o.table_no}</h2><span>{seatLabel(o)}</span></div>
-            <small>{dt(o.created_at)}</small>
-            {(o.order_items||[]).map(i => (
-              <div className="kitchenItem" key={i.id}>
-                <div><b>{i.qty} × {i.item_name}</b><small>{ITEM_STATUS[i.status||'NEW']}</small></div>
-                <div className="actions mini">
-                  {(i.status||'NEW')==='NEW' && (<><button className="primary" onClick={()=>updateItem(i.id,'PREPARING')}>Preparing</button><button className="success" onClick={()=>updateItem(i.id,'READY')}>✓ Ready Now</button></>)}
-                  {i.status==='PREPARING' && <button className="success" onClick={()=>updateItem(i.id,'READY')}>✓ Ready</button>}
-                  {i.status==='READY' && <button className="success" onClick={()=>updateItem(i.id,'SERVED')}>✓ Served</button>}
-                  {i.status==='SERVED' && <span className="badge green">SERVED</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
+ const dine=orders.filter(o=>orderType(o)==='DINE_IN'&&!['SERVED','PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
+ const take=orders.filter(o=>orderType(o)==='TAKEAWAY'&&!['SERVED','PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
+ const card=o=><div className="card" key={o.id}>
+   <div className="cardhead"><h2>{orderType(o)==='TAKEAWAY'?`🥡 PARCEL #${o.id.slice(0,6).toUpperCase()}`:`TABLE ${o.table_no}`}</h2><span className="orderTypeBadge">{orderTypeLabel(o)}</span></div>
+   {orderType(o)==='DINE_IN'&&<span>{seatLabel(o)}</span>}
+   {o.customer_name&&<small>Customer: {o.customer_name}{o.customer_phone?` • ${o.customer_phone}`:''}</small>}
+   <small>{dt(o.created_at)}</small>
+   {(o.order_items||[]).map(i=><div className="kitchenItem" key={i.id}>
+    <div><b>{i.qty} × {i.item_name}</b><small>{ITEM_STATUS[i.status||'NEW']}</small></div>
+    <div className="actions mini">
+     {(i.status||'NEW')==='NEW'&&<><button className="primary" onClick={()=>updateItem(i.id,'PREPARING')}>Preparing</button><button className="success" onClick={()=>updateItem(i.id,'READY')}>✓ Ready Now</button></>}
+     {i.status==='PREPARING'&&<button className="success" onClick={()=>updateItem(i.id,'READY')}>✓ Ready</button>}
+     {i.status==='READY'&&<button className="success" onClick={()=>updateItem(i.id,'SERVED')}>✓ Served</button>}
+     {i.status==='SERVED'&&<span className="badge green">SERVED</span>}
     </div>
-  );
-}
-function Billing({orders,pay}){
- const [openPay,setOpenPay]=useState(null),[expandedHistory,setExpandedHistory]=useState({});
- const activeBills=Object.values(
-   orders.filter(o=>o.status==='BILL_REQUESTED')
-     .reduce((a,o)=>{
-       const k=o.session_id||`single-${o.id}`;
-       (a[k]??=[]).push(o);
-       return a;
-     },{})
- );
- const history=orders
-   .filter(o=>o.status==='PAID')
-   .sort((a,b)=>new Date(b.paid_at||b.created_at)-new Date(a.paid_at||a.created_at));
-
- return <div>
-  <Title t="Billing" s="Active bills waiting for payment"/>
-  <div className="cards">
-   {activeBills.length===0&&<div className="empty panel">No active bills waiting for payment.</div>}
-   {activeBills.map(g=>{
-     const grand=g.reduce((s,o)=>s+total(o),0);
-     const sid=g[0].session_id||`single-${g[0].id}`;
-     return <div className="card" key={sid}>
-      <div className="cardhead">
-       <h2>TABLE {g[0].table_no}</h2>
-       <span className="status">BILL READY</span>
-      </div>
-
-      {g.map((o,i)=><div className="ticket" key={o.id}>
-       <div className="ticketHead">
-        <b>Order #{i+1}</b>
-        <span>{seatLabel(o)}</span>
-        <small>{dt(o.created_at)}</small>
-       </div>
-       {(o.order_items||[]).map(it=>
-        <div className="line" key={it.id}>
-         <span>{it.item_name} × {it.qty}</span>
-         <b>{money(it.line_total)}</b>
-        </div>
-       )}
-      </div>)}
-
-      <div className="grand">
-       <span>TOTAL BILL</span>
-       <b>{money(grand)}</b>
-      </div>
-
-      {openPay===sid?
-       <div className="paymentChooser">
-        <div className="paymentTitle">Select payment method</div>
-        <div className="paymentButtons">
-         <button className="success paymentBtn" onClick={()=>{pay(sid,'CASH');setOpenPay(null)}}>💵 CASH</button>
-         <button className="primary paymentBtn" onClick={()=>{pay(sid,'ONLINE');setOpenPay(null)}}>📱 ONLINE PAYMENT</button>
-        </div>
-        <button className="ghost full" onClick={()=>setOpenPay(null)}>Cancel</button>
-       </div>
-       :
-       <button className="success full" onClick={()=>setOpenPay(sid)}>
-        ✓ COLLECT PAYMENT — {money(grand)}
-       </button>
-      }
-     </div>
-   })}
+   </div>)}
+  </div>;
+ return <div><Title t="Kitchen" s="Dine-in and takeaway orders are separated for the chef."/>
+  <div className="kitchenSplit">
+   <section><div className="sectionTitle"><h2>🍽️ DINE-IN</h2><span>{dine.length} orders</span></div>{dine.length?dine.map(card):<div className="empty panel">No dine-in orders.</div>}</section>
+   <section><div className="sectionTitle"><h2>🥡 TAKEAWAY / PARCEL</h2><span>{take.length} orders</span></div>{take.length?take.map(card):<div className="empty panel">No takeaway orders.</div>}</section>
   </div>
-
-  <div className="sectionTitle" style={{marginTop:24}}>
-   <div>
-    <h2>Billing History</h2>
-    <p className="muted">Recently paid bills with amount and payment mode</p>
-   </div>
-  </div>
-
-  <Panel>
-   {history.length===0 ? (
-    <div className="empty">No paid bills yet.</div>
-   ) : (
-    <div className="tablewrap">
-     <table>
-      <thead>
-       <tr>
-        <th>Date & Time</th>
-        <th>Table</th>
-        <th>Order / Group</th>
-        <th>Bill Amount</th>
-        <th>Payment Mode</th>
-        <th>Status</th>
-       </tr>
-      </thead>
-      <tbody>
-       {history.map(o=><React.Fragment key={o.id}>
-        <tr className="historyRow" onClick={()=>setExpandedHistory(x=>({...x,[o.id]:!x[o.id]}))} style={{cursor:'pointer'}}>
-         <td>{expandedHistory[o.id]?'▼':'▶'} {fmtDateTime(o.paid_at||o.created_at)}</td>
-         <td>Table {o.table_no}</td>
-         <td>{seatLabel(o)}</td>
-         <td><b>{money(total(o))}</b></td>
-         <td><span className="status">{paymentBadge(o.payment_method)}</span></td>
-         <td><span className="badge green">PAID</span></td>
-        </tr>
-        {expandedHistory[o.id]&&<tr className="historyDetails">
-         <td colSpan="6">
-          <div className="historyItems">
-           <div className="historyItemsTitle">Bill Items</div>
-           {(o.order_items||[]).map(it=><div className="historyItem" key={it.id}>
-            <span>{it.item_name} × {it.qty}</span>
-            <span>{money(it.line_total)}</span>
-           </div>)}
-           <div className="historyTotal"><span>Total</span><b>{money(total(o))}</b></div>
-           <div className="historyMeta">
-            <span>Payment: <b>{paymentBadge(o.payment_method)}</b></span>
-            <span>Paid: {fmtDateTime(o.paid_at||o.created_at)}</span>
-           </div>
-          </div>
-         </td>
-        </tr>}
-       </React.Fragment>)}
-      </tbody>
-     </table>
-    </div>
-   )}
-  </Panel>
  </div>
 }
+function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTakeawayItem,takeawayQty,createTakeaway,sendTakeawayToBilling}){
+ const [openPay,setOpenPay]=useState(null),[expandedHistory,setExpandedHistory]=useState({});
+ const [customerName,setCustomerName]=useState(''),[customerPhone,setCustomerPhone]=useState('');
+ const [cat,setCat]=useState('All');
+ const menuItems=menu||[];
+ const dineBills=Object.values(orders.filter(o=>orderType(o)==='DINE_IN'&&o.status==='BILL_REQUESTED').reduce((a,o)=>{const k=o.session_id||`single-${o.id}`;(a[k]??=[]).push(o);return a},{}));
+ const takeawayBills=orders.filter(o=>orderType(o)==='TAKEAWAY'&&o.status==='BILL_REQUESTED');
+ const takeawayOpen=orders.filter(o=>orderType(o)==='TAKEAWAY'&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
+ const history=orders.filter(o=>o.status==='PAID').sort((a,b)=>new Date(b.paid_at||b.created_at)-new Date(a.paid_at||a.created_at));
+ const cats=['All',...new Set(menuItems.map(x=>x.category||'Other'))];
+ const list=menuItems.filter(x=>x.available!==false&&(cat==='All'||x.category===cat));
+ const takeawayTotal=takeawayCart.reduce((s,x)=>s+Number(x.price)*x.qty,0);
 
+ const payButtons=(key,fn)=><>{openPay===key?<div className="paymentChooser"><div className="paymentTitle">Select payment method</div><div className="paymentButtons"><button className="success paymentBtn" onClick={()=>{fn('CASH');setOpenPay(null)}}>💵 CASH</button><button className="primary paymentBtn" onClick={()=>{fn('ONLINE');setOpenPay(null)}}>📱 ONLINE PAYMENT</button></div><button className="ghost full" onClick={()=>setOpenPay(null)}>Cancel</button></div>:<button className="success full" onClick={()=>setOpenPay(key)}>✓ COLLECT PAYMENT</button>}</>;
+
+ return <div>
+  <Title t="Billing & Takeaway" s="Dine-in bills and takeaway orders are handled by the cashier."/>
+  <div className="billingSplit">
+   <section><div className="sectionTitle"><h2>🍽️ DINE-IN BILLS</h2><span>{dineBills.length}</span></div>
+    {dineBills.length===0?<div className="empty panel">No active dine-in bills.</div>:dineBills.map(g=>{const grand=g.reduce((s,o)=>s+total(o),0),sid=g[0].session_id||`single-${g[0].id}`;return <div className="card" key={sid}><div className="cardhead"><h2>TABLE {g[0].table_no}</h2><span className="orderTypeBadge">🍽️ DINE IN</span></div>{g.map(o=><div className="ticket" key={o.id}><div className="ticketHead"><b>{seatLabel(o)}</b><small>{dt(o.created_at)}</small></div>{(o.order_items||[]).map(it=><div className="line" key={it.id}><span>{it.item_name} × {it.qty}</span><b>{money(it.line_total)}</b></div>)}</div>)}<div className="grand"><span>TOTAL</span><b>{money(grand)}</b></div>{payButtons(sid,m=>pay(sid,m))}</div>})}
+   </section>
+
+   <section><div className="sectionTitle"><h2>🥡 TAKEAWAY / PARCEL</h2><span>{takeawayOpen.length+takeawayBills.length}</span></div>
+    <div className="card takeawayCreator">
+     <h3>New Takeaway Order</h3>
+     <div className="formGrid"><input placeholder="Customer name (optional)" value={customerName} onChange={e=>setCustomerName(e.target.value)}/><input placeholder="Phone (optional)" value={customerPhone} onChange={e=>setCustomerPhone(e.target.value)}/></div>
+     <div className="chips">{cats.map(x=><button className={cat===x?'on':''} onClick={()=>setCat(x)} key={x}>{x}</button>)}</div>
+     <div className="foods">{list.map(i=><button className="food" onClick={()=>addTakeawayItem(i)} key={i.id}><b>{i.name}</b><small>{i.category}</small><strong>{money(i.price)}</strong></button>)}</div>
+     {takeawayCart.map(i=><div className="cart" key={i.id}><div><b>{i.name}</b><small>{money(i.price)} each</small></div><div className="counter"><button onClick={()=>takeawayQty(i.id,-1)}>−</button><b>{i.qty}</b><button onClick={()=>takeawayQty(i.id,1)}>+</button></div><strong>{money(i.price*i.qty)}</strong></div>)}
+     <div className="grand"><span>PARCEL TOTAL</span><b>{money(takeawayTotal)}</b></div>
+     <button className="kitchen fullBtn" disabled={!takeawayCart.length} onClick={async()=>{await createTakeaway(customerName,customerPhone);setCustomerName('');setCustomerPhone('')}}>👨‍🍳 SEND TAKEAWAY TO KITCHEN</button>
+    </div>
+
+    {takeawayOpen.length>0&&<Panel t="Takeaway Orders in Kitchen"><div className="cards">{takeawayOpen.map(o=><div className="ticket" key={o.id}><div className="ticketHead"><b>🥡 PARCEL #{o.id.slice(0,6).toUpperCase()}</b><span>{STATUS[o.status]}</span><small>{dt(o.created_at)}</small></div>{(o.order_items||[]).map(it=><ItemRow key={it.id} item={it}/>) }<div className="grand"><b>{money(total(o))}</b></div><button className="bill fullBtn" onClick={()=>sendTakeawayToBilling(o.id)}>🧾 SEND TO BILL — {money(total(o))}</button></div>)}</div></Panel>}
+
+    {takeawayBills.length>0&&<Panel t="Takeaway Bills Ready"><div className="cards">{takeawayBills.map(o=><div className="ticket" key={o.id}><div className="ticketHead"><b>🥡 PARCEL #{o.id.slice(0,6).toUpperCase()}</b><span className="orderTypeBadge">TAKEAWAY</span><small>{dt(o.created_at)}</small></div>{o.customer_name&&<small>{o.customer_name}{o.customer_phone?` • ${o.customer_phone}`:''}</small>}{(o.order_items||[]).map(it=><div className="line" key={it.id}><span>{it.item_name} × {it.qty}</span><b>{money(it.line_total)}</b></div>)}<div className="grand"><span>TOTAL</span><b>{money(total(o))}</b></div>{payButtons(`take-${o.id}`,m=>paySingle(o.id,m))}</div>)}</div></Panel>}
+   </section>
+  </div>
+
+  <div className="sectionTitle" style={{marginTop:24}}><div><h2>Billing History</h2><p className="muted">Expand a paid bill to see every item, order type and payment mode.</p></div></div>
+  <Panel>{history.length===0?<div className="empty">No paid bills yet.</div>:<div className="tablewrap"><table><thead><tr><th>Date & Time</th><th>Type</th><th>Table / Parcel</th><th>Group</th><th>Amount</th><th>Payment</th><th>Status</th></tr></thead><tbody>
+   {history.map(o=><React.Fragment key={o.id}><tr className="historyRow" onClick={()=>setExpandedHistory(x=>({...x,[o.id]:!x[o.id]}))} style={{cursor:'pointer'}}>
+    <td>{expandedHistory[o.id]?'▼':'▶'} {fmtDateTime(o.paid_at||o.created_at)}</td><td>{orderTypeLabel(o)}</td><td>{orderType(o)==='TAKEAWAY'?`Parcel #${o.id.slice(0,6).toUpperCase()}`:`Table ${o.table_no}`}</td><td>{orderType(o)==='TAKEAWAY'?(o.customer_name||'—'):seatLabel(o)}</td><td><b>{money(total(o))}</b></td><td><span className="status">{paymentBadge(o.payment_method)}</span></td><td><span className="badge green">PAID</span></td>
+   </tr>{expandedHistory[o.id]&&<tr className="historyDetails"><td colSpan="7"><div className="historyItems"><div className="historyItemsTitle">Bill Items</div>{(o.order_items||[]).map(it=><div className="historyItem" key={it.id}><span>{it.item_name} × {it.qty}</span><span>{money(it.line_total)}</span></div>)}<div className="historyTotal"><span>Total</span><b>{money(total(o))}</b></div><div className="historyMeta"><span>Order: <b>{orderTypeLabel(o)}</b></span><span>Payment: <b>{paymentBadge(o.payment_method)}</b></span><span>Paid: {fmtDateTime(o.paid_at||o.created_at)}</span></div></div></td></tr>}</React.Fragment>)}
+  </tbody></table></div>}</Panel>
+ </div>
+}
 
 function TableHistory({orders,pay,role,updateItem,deleteItem}){
  const [openPay,setOpenPay]=useState(null);
