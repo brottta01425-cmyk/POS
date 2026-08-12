@@ -208,3 +208,9 @@ create policy "Authenticated staff can manage salary payments" on public.salary_
 -- v7 payroll behavior is calculated in the app: weekly periods are Monday-Sunday;
 -- monthly periods are the first through last day of the current calendar month.
 -- HALF_DAY attendance counts as 0.5 day toward salary.
+
+
+-- v17 order source
+alter table public.orders add column if not exists order_source text not null default 'DIRECT';
+alter table public.orders drop constraint if exists orders_order_source_check;
+alter table public.orders add constraint orders_order_source_check check (order_source in ('DIRECT','ZOMATO'));

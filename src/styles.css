@@ -105,3 +105,294 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .takeawayCreator .foods{max-height:280px;overflow:auto}
 .kitchenSplit>section,.billingSplit>section{min-width:0}
 @media(max-width:900px){.billingSplit,.kitchenSplit,.splitStats{grid-template-columns:1fr}}
+
+/* Branding + receipt printer */
+.brandWrap{display:flex;align-items:center;gap:10px}.brandWrap>div{display:flex;flex-direction:column}.brandWrap b{font-size:18px;line-height:1}.brandWrap small{display:block;margin:3px 0 0!important}
+.brandLogo{width:128px;height:44px;object-fit:contain;background:#f3e3bd;border-radius:4px}
+.loginBrandLogo{display:block;width:240px;max-width:100%;margin:0 auto 12px;filter:none;border-radius:6px}
+.dashboardBrand{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px 16px;margin-bottom:16px}
+.dashboardBrand img{width:180px;max-height:64px;object-fit:contain}.dashboardBrand h2{margin:0}.dashboardBrand span{color:var(--muted);font-size:13px}
+.printerBtn,.printBtn{border:1px solid var(--border);background:var(--surface2);color:var(--text);padding:8px 11px;border-radius:8px;font-weight:700}
+header .printerBtn{color:white;background:#23324a;border-color:#53657e}.printerBtn.connected{background:#146b37;border-color:#2ca25f}
+.printerPanel{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 16px;margin-bottom:16px}
+.printerPanel>div{display:flex;flex-direction:column;gap:3px}.printerPanel small{color:var(--muted)}
+.billActionRow{display:flex;gap:8px;margin:9px 0}.billActionRow .printBtn{width:100%}
+.historyMeta .printBtn{margin-left:auto}
+@media(max-width:650px){.brandLogo{width:95px;height:36px}.brandWrap>div{display:none}header{gap:6px}.printerBtn{font-size:11px;padding:7px}.dashboardBrand img{width:130px}}
+
+.printerConfig{flex-wrap:wrap}.printerModes{display:flex;gap:6px;flex-wrap:wrap}.printerModes button{padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text)}.printerModes button.on{font-weight:800;outline:2px solid currentColor}.wifiSettings{display:grid;grid-template-columns:1fr 100px auto;gap:7px;width:100%;align-items:center}.wifiSettings input{min-width:0}.wifiSettings small{grid-column:1/-1;color:var(--muted);line-height:1.35}@media(max-width:650px){.wifiSettings{grid-template-columns:1fr}.wifiSettings small{grid-column:1}}
+
+
+/* ===== Brottta POS Responsive Layout v15 ===== */
+html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
+body{min-width:0}
+button,input,select,textarea{max-width:100%}
+img{max-width:100%;height:auto}
+main{min-width:0}
+button{min-height:36px}
+.primary,.success,.danger,.small,.ghost,.themeBtn,.printerBtn,.printBtn{padding:8px 11px}
+.full,.fullBtn{width:100%}
+header{min-height:62px;height:auto;gap:10px;flex-wrap:wrap}
+header>div:last-child{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.brandWrap{min-width:0}
+.brandLogo{flex:0 0 auto}
+aside{flex:0 0 190px}
+aside button{font-size:14px}
+.cards{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.stats{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}
+.tables{grid-template-columns:repeat(auto-fit,minmax(90px,1fr))}
+.foods{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+.billingSplit,.kitchenSplit,.splitStats{min-width:0}
+.panel,.card{min-width:0}
+.tablewrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{min-width:640px}
+.cart{grid-template-columns:minmax(0,1fr) auto auto}
+.cart>div:first-child{min-width:0;overflow-wrap:anywhere}
+.counter button{width:32px;min-width:32px}
+.line{min-width:0}
+.line span:first-child{min-width:0;overflow-wrap:anywhere}
+.formGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+input,select,textarea{width:100%;padding:9px 10px;border-radius:8px}
+
+@media (max-width: 1024px){
+  .layout{display:block}
+  aside{
+    width:100%;max-width:100%;display:flex;gap:6px;overflow-x:auto;white-space:nowrap;
+    border-right:0;border-bottom:1px solid var(--border);padding:8px;position:sticky;top:0;z-index:20;
+  }
+  aside button{width:auto;flex:0 0 auto;min-width:max-content;margin:0;padding:9px 12px;font-size:13px}
+  main{padding:16px}
+  .pos{grid-template-columns:1fr}
+  .billingSplit,.kitchenSplit,.splitStats{grid-template-columns:1fr}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .foods{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+}
+
+@media (max-width: 640px){
+  body{font-size:14px}
+  main{padding:10px}
+  header{padding:8px 10px;align-items:center}
+  .brandLogo{width:82px;height:34px}
+  .brandWrap>div{display:none}
+  header>div:last-child{width:100%;justify-content:flex-start}
+  header .pill{order:-1}
+  header .printerBtn,header .themeBtn,header .soundBtn,header .ghost{
+    min-height:32px;padding:6px 8px;font-size:11px
+  }
+  .title{align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .title h1{font-size:20px}
+  .title p{font-size:12px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .stat{padding:11px}
+  .stat b{font-size:18px}
+  .tables{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .tables button{padding:9px 4px;font-size:12px;min-width:0}
+  .tables small{font-size:10px}
+  .seatChooser{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .seatChooser button{width:100%;padding:8px 5px;font-size:12px}
+  .foods{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .food{padding:10px;min-height:82px}
+  .food b{font-size:13px}
+  .food small{font-size:10px}
+  .food strong{font-size:13px}
+  .chips{gap:5px}
+  .chips button{padding:6px 9px;font-size:11px}
+  .panel,.card{padding:12px;border-radius:10px}
+  .panel h2,.card h2{font-size:17px}
+  .cart{grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .cart>strong{grid-column:1/-1;justify-self:end;font-size:13px}
+  .counter button{width:30px;height:30px;min-width:30px}
+  .counter b{width:26px}
+  .line{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px}
+  .line strong{justify-self:end}
+  .itemLine{grid-template-columns:minmax(0,1fr) auto}
+  .itemLine .itemBadge{justify-self:end}
+  .itemLine strong{grid-column:2}
+  .itemLine button{grid-column:1/-1;width:100%;margin-top:3px}
+  .ticketHead{flex-wrap:wrap;gap:6px}
+  .ticketHead small{margin-left:0;width:100%}
+  .billCheck{width:100%;display:flex;align-items:center;gap:6px}
+  .actions,.paymentButtons{grid-template-columns:1fr}
+  .actions.mini{display:flex;flex-wrap:wrap}
+  .actions.mini button{flex:1 1 110px;font-size:11px;padding:7px}
+  .grand,.total{font-size:16px;padding:10px 0}
+  .fullBtn,.full{padding:10px;font-size:13px}
+  .billingSplit,.kitchenSplit{gap:10px}
+  .sectionTitle{align-items:flex-start;gap:8px;flex-wrap:wrap}
+  .sectionTitle h2{font-size:17px}
+  .formGrid{grid-template-columns:1fr}
+  .printerPanel{align-items:stretch}
+  .printerModes{width:100%}
+  .printerModes button{flex:1 1 calc(50% - 6px);font-size:11px;padding:7px}
+  .wifiSettings{grid-template-columns:1fr}
+  .dashboardBrand{padding:10px}
+  .dashboardBrand img{width:110px}
+  .dashboardBrand h2{font-size:17px}
+  .loginbox{padding:20px;width:min(94vw,430px)}
+  .roles{grid-template-columns:repeat(2,1fr)}
+  .loginBrandLogo{width:180px}
+  .historyMeta{display:grid;grid-template-columns:1fr;gap:6px}
+  .historyMeta .printBtn{margin-left:0;width:100%}
+  .rank{grid-template-columns:34px minmax(0,1fr) auto;gap:6px}
+}
+
+@media (max-width: 390px){
+  .stats{grid-template-columns:1fr 1fr}
+  .tables{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .foods{grid-template-columns:1fr 1fr}
+  .seatChooser{grid-template-columns:1fr 1fr}
+  header>div:last-child{gap:5px}
+  header .pill{font-size:10px}
+  .printerModes button{flex:1 1 100%}
+}
+
+@media (min-width: 1200px){
+  main{padding:24px 28px}
+  .layout{align-items:stretch}
+  .billingSplit,.kitchenSplit{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .pos{grid-template-columns:minmax(0,1.35fr) minmax(340px,.9fr)}
+}
+
+.nativeBtSettings{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;width:100%;align-items:center}
+.nativeBtSettings select{width:100%}.nativeBtSettings small{grid-column:1/-1;color:var(--muted)}
+@media(max-width:650px){.nativeBtSettings{grid-template-columns:1fr}.nativeBtSettings small{grid-column:1}}
+
+
+/* ===== v17 Orange + Black UX theme ===== */
+:root{
+  color-scheme:light;
+  --bg:#ffffff;
+  --surface:#ffffff;
+  --surface2:#fff7ed;
+  --text:#171717;
+  --muted:#6b7280;
+  --border:#fed7aa;
+  --primary:#f97316;
+  --dark:#111111;
+  --danger:#dc2626;
+  --orange:#f97316;
+  --orangeSoft:#fff7ed;
+  --success:#16a34a;
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#050505;
+  --surface:#0d0d0d;
+  --surface2:#17120e;
+  --text:#f8fafc;
+  --muted:#a3a3a3;
+  --border:#3a291c;
+  --primary:#ff7a00;
+  --dark:#000000;
+  --danger:#ef4444;
+  --orange:#ff7a00;
+  --orangeSoft:#261407;
+  --success:#22c55e;
+}
+body{background:var(--bg);color:var(--text)}
+header{background:#050505;border-bottom:1px solid #332011}
+aside{background:var(--surface)}
+aside button.active,aside button:hover{background:var(--orangeSoft);color:var(--orange);box-shadow:inset 3px 0 0 var(--orange)}
+.primary{background:var(--orange)}
+.kitchen{background:var(--orange)}
+.bill{background:var(--orange)}
+.roles .sel{background:var(--orange);color:#fff;border-color:var(--orange)}
+.chips .on,.payToggle .on,.selectedSeat,.tables button.selected,.printerModes button.on{border-color:var(--orange)!important;color:var(--orange)!important;background:var(--orangeSoft)!important}
+.panel,.card,.loginbox,.modalCard{border-color:var(--border)}
+input:focus,select:focus,textarea:focus{outline:2px solid color-mix(in srgb,var(--orange) 35%,transparent);border-color:var(--orange)}
+a{color:var(--orange)}
+
+button{min-height:32px}
+.compactBtn,.compactAction,.small{min-height:30px;padding:6px 10px!important;font-size:12px;border-radius:7px}
+.compactAction{border:0;color:#fff;font-weight:800}
+.rowActions,.compactActions,.billActionRow{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.rowActions button{width:auto!important}
+.billActionRow>button,.billActionRow>.paymentChooser{flex:0 1 auto}
+.paymentButtons button{min-height:34px;padding:7px 11px;font-size:12px}
+
+/* Centered responsive popups instead of right-side drawers */
+.drawerBackdrop,.modalBackdrop{
+  position:fixed!important;inset:0!important;background:rgba(0,0,0,.72)!important;
+  display:grid!important;place-items:center!important;padding:14px!important;z-index:1000!important;
+  backdrop-filter:blur(3px);
+}
+.drawer,.modalCard{
+  position:relative!important;inset:auto!important;right:auto!important;top:auto!important;
+  width:min(560px,96vw)!important;max-width:96vw!important;max-height:min(86vh,760px)!important;
+  overflow:auto!important;background:var(--surface)!important;color:var(--text)!important;
+  border:1px solid var(--border)!important;border-radius:16px!important;padding:18px!important;
+  box-shadow:0 30px 90px #000b!important;transform:none!important;
+}
+.salaryReviewModal{width:min(760px,96vw)!important}
+.compactModal{width:min(470px,96vw)!important}
+.foodModal{width:min(600px,96vw)!important}
+.drawerHead,.modalHead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+.drawerHead h2,.modalHead h2{margin:0;font-size:20px}
+.modalHead small{color:var(--muted)}
+.drawerHead button,.modalClose{border:0;background:var(--surface2);color:var(--text);width:30px;height:30px;min-height:30px;border-radius:50%;font-size:20px;line-height:1}
+.modalGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.modalCard label,.drawer label{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;font-size:12px;font-weight:700}
+.modalActions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+
+.sourceSelector{display:flex;gap:8px;margin:8px 0 12px}
+.sourceSelector label{display:flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:7px 11px;font-size:12px;cursor:pointer}
+.sourceSelector input{width:auto}
+.sourceBadge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;background:var(--surface2);border:1px solid var(--border);color:var(--muted)}
+.sourceBadge.zomato{background:#fff1f2;color:#e11d48;border-color:#fecdd3}
+:root[data-theme="dark"] .sourceBadge.zomato{background:#3a0a12;color:#fb7185;border-color:#7f1d1d}
+
+.relativeTicket{position:relative;padding-top:15px}
+.iconCancel{position:absolute;right:5px;top:5px;width:27px;height:27px;min-height:27px;border-radius:50%;border:1px solid #7f1d1d;background:#2b0b0b;color:#fca5a5;font-weight:900;font-size:17px;z-index:2}
+.iconCancel:hover{background:#7f1d1d;color:white}
+
+.connectionBadge{display:inline-flex;align-items:center;gap:5px;margin-top:4px;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:800}
+.connectionBadge.connected{background:#052e16;color:#86efac;border:1px solid #166534}
+.connectionBadge.offline{background:#2b0b0b;color:#fca5a5;border:1px solid #7f1d1d}
+
+.singleDatePicker{display:flex;align-items:end;gap:8px;margin-bottom:14px}
+.singleDatePicker label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:700}
+.singleDatePicker input{width:auto;min-width:155px}
+
+.salarySummary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+.salarySummary span,.insightCard{border:1px solid var(--border);background:var(--surface2);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:3px}
+.advanceReview{border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:12px 0;margin:12px 0}
+.advanceReview .sectionTitle{margin:0 0 8px}
+.advanceRow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--border)}
+.advanceRow:first-of-type{border-top:0}.advanceRow>div{display:flex;flex-direction:column}.advanceRow small{color:var(--muted)}
+.iconDelete{width:31px;height:31px;min-height:31px;border:1px solid #7f1d1d;border-radius:8px;background:transparent;color:#f87171}
+.netSalary{font-size:16px;color:var(--orange)}
+.availabilityBadge{font-size:10px;font-weight:800;border-radius:999px;padding:4px 7px;background:#2b0b0b;color:#fca5a5}
+.availabilityBadge.available{background:#052e16;color:#86efac}
+
+.insightGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.insightCard span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.insightCard b{font-size:20px;color:var(--orange)}.insightCard small{color:var(--muted)}
+.trendBars{display:flex;flex-direction:column;gap:7px}.trendRow{display:grid;grid-template-columns:90px minmax(120px,1fr) 100px 75px;gap:8px;align-items:center;font-size:12px}
+.trendTrack{height:10px;background:var(--surface2);border:1px solid var(--border);border-radius:999px;overflow:hidden}.trendTrack i{display:block;height:100%;background:var(--orange);border-radius:999px}
+.trendRow.best{background:var(--orangeSoft);border-radius:8px;padding:5px}.trendRow.best>span{color:var(--orange);font-weight:800}
+
+.badgeRow{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+
+/* Mobile + tablet polish */
+@media(max-width:768px){
+  .drawer,.modalCard{padding:14px!important;border-radius:14px!important}
+  .modalGrid{grid-template-columns:1fr}
+  .salarySummary{grid-template-columns:1fr 1fr 1fr}
+  .trendRow{grid-template-columns:72px minmax(80px,1fr) 80px}.trendRow small{display:none}
+  .compactBtn,.compactAction,.small{font-size:11px;padding:6px 8px!important}
+  .rowActions{min-width:180px}
+}
+@media(max-width:480px){
+  .salarySummary{grid-template-columns:1fr}
+  .insightGrid{grid-template-columns:1fr}
+  .trendRow{grid-template-columns:60px minmax(70px,1fr) 72px;font-size:10px}
+  .modalActions{flex-direction:column}.modalActions button{width:100%}
+  .singleDatePicker{align-items:stretch;flex-direction:column}.singleDatePicker input{width:100%}
+}
+
+/* v17.1 header branding */
+.poweredBy{font-size:12px;color:#cbd5e1;white-space:nowrap}.poweredBy b{color:var(--orange);font-weight:800}
+@media(max-width:480px){.poweredBy{font-size:10px}}
+
+.kitchenPaymentBadge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 7px;font-size:9px;font-weight:900;letter-spacing:.04em}
+.kitchenPaymentBadge.billed{background:#2b1a05;color:#fdba74;border:1px solid #9a3412}
+.kitchenPaymentBadge.paid{background:#052e16;color:#86efac;border:1px solid #166534}
