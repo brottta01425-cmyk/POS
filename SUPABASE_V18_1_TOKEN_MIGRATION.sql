@@ -1,23 +1,52 @@
--- Brottta POS v17 migration
+-- Brottta POS v18.1 - Daily Takeaway / Parcel Token Number
 -- Run once in Supabase SQL Editor.
+-- Counter is based on India time (Asia/Kolkata).
+-- Each new calendar day begins again with token 1.
 
 alter table public.orders
-  add column if not exists order_source text not null default 'DIRECT';
+  add column if not exists token_number integer;
 
-alter table public.orders
-  drop constraint if exists orders_order_source_check;
+create table if not exists public.daily_takeaway_tokens (
+  token_date date primary key,
+  last_token integer not null default 0
+);
 
-alter table public.orders
-  add constraint orders_order_source_check
-  check (order_source in ('DIRECT','ZOMATO'));
+create or replace function public.assign_takeaway_token()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  local_date date;
+  next_token integer;
+begin
+  if new.order_type = 'TAKEAWAY' and new.token_number is null then
+    local_date := (now() at time zone 'Asia/Kolkata')::date;
 
-create index if not exists orders_order_source_idx
-  on public.orders(order_source);
+    insert into public.daily_takeaway_tokens(token_date, last_token)
+    values (local_date, 1)
+    on conflict (token_date)
+    do update set last_token = public.daily_takeaway_tokens.last_token + 1
+    returning last_token into next_token;
 
--- Attendance values used by the responsive attendance screen.
-alter table public.attendance
-  drop constraint if exists attendance_status_check;
+    new.token_number := next_token;
+  end if;
 
-alter table public.attendance
-  add constraint attendance_status_check
-  check (status in ('PRESENT','ABSENT','HALF_DAY','LEAVE'));
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_assign_takeaway_token on public.orders;
+
+create trigger trg_assign_takeaway_token
+before insert on public.orders
+for each row
+execute function public.assign_takeaway_token();
+
+create index if not exists orders_takeaway_token_idx
+  on public.orders ((created_at at time zone 'Asia/Kolkata')::date, token_number)
+  where order_type = 'TAKEAWAY';
+
+-- Optional cleanup: old counter rows can be retained safely.
+-- They are tiny and make historical auditing easier.

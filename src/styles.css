@@ -396,3 +396,42 @@ button{min-height:32px}
 .kitchenPaymentBadge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 7px;font-size:9px;font-weight:900;letter-spacing:.04em}
 .kitchenPaymentBadge.billed{background:#2b1a05;color:#fdba74;border:1px solid #9a3412}
 .kitchenPaymentBadge.paid{background:#052e16;color:#86efac;border:1px solid #166534}
+
+/* ===== v18 Payroll / split bills / super admin ===== */
+.employeeDirectory{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.employeeDirectoryCard{display:flex;flex-direction:column;gap:12px;margin:0}
+.employeeDirectoryCard h3{margin:0;font-size:17px}
+.employeeDirectoryCard small{color:var(--muted)}
+.employeeLendingMini{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface2)}
+.employeeLendingMini span{font-size:11px;color:var(--muted)}
+.employeeLendingMini b{color:var(--orange);font-size:16px}
+
+/* Per-day salary input should remain clearly editable */
+.inlineInput{background:#e5e7eb!important;color:#111827!important;border:1px solid #cbd5e1!important}
+.inlineInput:focus{background:#f3f4f6!important;border-color:var(--orange)!important}
+
+/* One bill = one chair/group ticket. Never visually merge two bills from the same table. */
+.dineBillCards{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.individualBillCard{border:1px solid var(--border);box-shadow:0 0 0 1px transparent}
+.individualBillCard:hover{border-color:var(--orange);box-shadow:0 0 0 1px var(--orange)}
+.billSeatLabel{display:inline-flex;margin-top:4px;padding:4px 8px;border-radius:999px;background:var(--orangeSoft);color:var(--orange);font-size:11px;font-weight:900;border:1px solid var(--border)}
+.billOrderMeta{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:11px;padding:6px 0 9px;border-bottom:1px solid var(--border);margin-bottom:5px}
+.individualBillCard .billActionRow{justify-content:space-between}
+.individualBillCard .billActionRow>button{flex:1 1 120px}
+.individualBillCard .paymentChooser{width:100%}
+
+/* Super-admin/login role grid stays compact with five roles */
+.roles{grid-template-columns:repeat(auto-fit,minmax(74px,1fr))}
+
+@media(max-width:640px){
+ .employeeDirectory{grid-template-columns:1fr}
+ .dineBillCards{grid-template-columns:1fr}
+ .individualBillCard .billActionRow{display:grid;grid-template-columns:1fr 1fr}
+ .individualBillCard .paymentChooser{grid-column:1/-1}
+}
+
+.tokenBadge{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:var(--orangeSoft);color:var(--orange);border:1px solid var(--orange);font-size:10px;font-weight:900}
+
+.billActionRow .danger.compactBtn{background:#7f1d1d;color:#fff;border:1px solid #b91c1c}
+.billActionRow .danger.compactBtn:hover{background:#991b1b}
+@media(max-width:640px){.billActionRow .danger.compactBtn{width:100%}}

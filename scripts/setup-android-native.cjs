@@ -25,6 +25,8 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+import com.getcapacitor.PermissionState;
 
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -36,8 +38,7 @@ import java.util.UUID;
   name = "NativePrinter",
   permissions = {
     @Permission(alias="btConnect", strings={
-      Manifest.permission.BLUETOOTH_CONNECT,
-      Manifest.permission.BLUETOOTH_SCAN
+      Manifest.permission.BLUETOOTH_CONNECT
     })
   }
 )
@@ -49,9 +50,36 @@ public class NativePrinterPlugin extends Plugin {
       getContext().checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=android.content.pm.PackageManager.PERMISSION_GRANTED;
   }
 
+  @PermissionCallback
+  private void listBluetoothDevicesPermissionCallback(PluginCall call){
+    if(getPermissionState("btConnect")==PermissionState.GRANTED){
+      listBluetoothDevices(call);
+    }else{
+      call.reject("Nearby devices permission is required to show paired Bluetooth printers.");
+    }
+  }
+
+  @PermissionCallback
+  private void testBluetoothPermissionCallback(PluginCall call){
+    if(getPermissionState("btConnect")==PermissionState.GRANTED){
+      testBluetooth(call);
+    }else{
+      call.reject("Nearby devices permission is required to connect to the Bluetooth printer.");
+    }
+  }
+
+  @PermissionCallback
+  private void printBluetoothPermissionCallback(PluginCall call){
+    if(getPermissionState("btConnect")==PermissionState.GRANTED){
+      printBluetooth(call);
+    }else{
+      call.reject("Nearby devices permission is required to print over Bluetooth.");
+    }
+  }
+
   @PluginMethod
   public void listBluetoothDevices(PluginCall call){
-    if(needsBtPermission()){ requestPermissionForAlias("btConnect",call,"listBluetoothDevices"); return; }
+    if(needsBtPermission()){ requestPermissionForAlias("btConnect",call,"listBluetoothDevicesPermissionCallback"); return; }
     try{
       BluetoothAdapter adapter=BluetoothAdapter.getDefaultAdapter();
       if(adapter==null){call.reject("Bluetooth is not supported on this tablet.");return;}
@@ -69,7 +97,7 @@ public class NativePrinterPlugin extends Plugin {
 
   @PluginMethod
   public void testBluetooth(PluginCall call){
-    if(needsBtPermission()){ requestPermissionForAlias("btConnect",call,"testBluetooth"); return; }
+    if(needsBtPermission()){ requestPermissionForAlias("btConnect",call,"testBluetoothPermissionCallback"); return; }
     String address=call.getString("address");
     if(address==null){call.reject("Bluetooth address is required.");return;}
     new Thread(()->{
@@ -78,7 +106,6 @@ public class NativePrinterPlugin extends Plugin {
         BluetoothAdapter adapter=BluetoothAdapter.getDefaultAdapter();
         BluetoothDevice device=adapter.getRemoteDevice(address);
         socket=device.createRfcommSocketToServiceRecord(SPP_UUID);
-        adapter.cancelDiscovery();
         socket.connect();
         socket.close();
         JSObject r=new JSObject();r.put("connected",true);call.resolve(r);
@@ -88,7 +115,7 @@ public class NativePrinterPlugin extends Plugin {
 
   @PluginMethod
   public void printBluetooth(PluginCall call){
-    if(needsBtPermission()){ requestPermissionForAlias("btConnect",call,"printBluetooth"); return; }
+    if(needsBtPermission()){ requestPermissionForAlias("btConnect",call,"printBluetoothPermissionCallback"); return; }
     String address=call.getString("address"),data=call.getString("data");
     if(address==null||data==null){call.reject("Bluetooth address and print data are required.");return;}
     new Thread(()->{
@@ -97,7 +124,6 @@ public class NativePrinterPlugin extends Plugin {
         BluetoothAdapter adapter=BluetoothAdapter.getDefaultAdapter();
         BluetoothDevice device=adapter.getRemoteDevice(address);
         socket=device.createRfcommSocketToServiceRecord(SPP_UUID);
-        adapter.cancelDiscovery();
         socket.connect();
         OutputStream out=socket.getOutputStream();
         out.write(Base64.decode(data,Base64.DEFAULT));out.flush();
@@ -160,8 +186,7 @@ const perms=[
   '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />',
   '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
   '<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
-  '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />',
-  '<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />'
+  '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />'
 ];
 for(const p of perms){
   if(!xml.includes(p)) xml=xml.replace('<application',p+'\\n    <application');

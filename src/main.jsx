@@ -5,7 +5,15 @@ import * as XLSX from 'xlsx';
 import { isNativeAndroid, listPairedBluetoothPrinters, nativePrintBluetooth, nativePrintWifi, nativeTestWifi, nativeTestBluetooth } from './nativePrinter';
 import'./styles.css';
 
-const ROLES={admin:'Admin',waiter:'Waiter',chef:'Chef',cashier:'Cashier'};
+const ROLES={super_admin:'Super Admin',admin:'Admin',waiter:'Waiter',chef:'Chef',cashier:'Cashier'};
+const NAV_BY_ROLE={
+ waiter:[['pos','Take Order'],['ready','Ready Orders'],['orders','Table History']],
+ chef:[['kitchen','Kitchen'],['orders','Orders']],
+ cashier:[['billing','Bills'],['orders','Orders'],['analytics','Sales']],
+ admin:[['dashboard','Dashboard'],['pos','Take Order'],['kitchen','Kitchen'],['billing','Bills'],['orders','Table History'],['menu','Food Items'],['employees','Employees'],['attendance','Attendance'],['expenses','Expenses'],['analytics','Analytics']],
+ super_admin:[['dashboard','Dashboard'],['pos','Take Order'],['kitchen','Kitchen'],['billing','Bills'],['orders','Table History'],['menu','Food Items'],['employees','Employees'],['payroll','Payroll'],['attendance','Attendance'],['expenses','Expenses'],['analytics','Analytics']]
+};
+const getNavForRole=role=>NAV_BY_ROLE[role]||NAV_BY_ROLE.admin;
 const TABLES=Array.from({length:20},(_,i)=>i+1);
 const STATUS={NEW:'New',PREPARING:'Preparing',READY:'Ready',SERVED:'Served',BILL_REQUESTED:'Bill Ready',PAID:'Paid',CANCELLED:'Cancelled'};
 const ITEM_STATUS={NEW:'Pending',PREPARING:'Preparing',READY:'Ready',SERVED:'Served',CANCELLED:'Cancelled'};
@@ -53,7 +61,7 @@ async function writeUsbPrinter(data){
 async function printUsbReceipt(orderList){
  const init=new Uint8Array([0x1b,0x40,0x1b,0x61,0x01]);
  let logo=new Uint8Array();try{logo=await logoEscPos()}catch{}
- const title=bytes('\nBROTTTA\nSPECIALISED IN PAROTTA\n');
+ const title=bytes('\n');
  const body=bytes(receiptText(orderList));
  const cut=new Uint8Array([0x1d,0x56,0x41,0x03]);
  await writeUsbPrinter(concatBytes(init,logo,title,new Uint8Array([0x1b,0x61,0x00]),body,cut));
@@ -62,7 +70,7 @@ async function printUsbReceipt(orderList){
 async function buildEscPosReceipt(orderList){
  const init=new Uint8Array([0x1b,0x40,0x1b,0x61,0x01]);
  let logo=new Uint8Array();try{logo=await logoEscPos()}catch{}
- const title=bytes('\nBROTTTA\nSPECIALISED IN PAROTTA\n');
+ const title=bytes('\n');
  const body=bytes(receiptText(orderList));
  const cut=new Uint8Array([0x1d,0x56,0x41,0x03]);
  return concatBytes(init,logo,title,new Uint8Array([0x1b,0x61,0x00]),body,cut);
@@ -139,7 +147,10 @@ function receiptText(orderList){
  out+=`Date : ${date}        Time : ${time}\n`;
  out+=`Order No : ${orderNo}\n`;
  out+=`Type : ${isTake?'TAKEAWAY / PARCEL':'DINE IN'}\n`;
- if(isTake)out+=`Source : ${orderSource(first)==='ZOMATO'?'ZOMATO ORDER':'DIRECT'}\n`;
+ if(isTake){
+   out+=`Source : ${orderSource(first)==='ZOMATO'?'ZOMATO ORDER':'DIRECT'}\n`;
+   out+=`Token No : ${first.token_number??'-'}\n`;
+ }
  if(!isTake){out+=`Table : ${first.table_no}\n`;out+=`Chair : ${seatLabel(first)}\n`}
  else if(first.customer_name){out+=`Customer : ${first.customer_name}\n`}
  out+='------------------------------------------\n';
@@ -150,7 +161,9 @@ function receiptText(orderList){
  out+=`${pad('TOTAL AMOUNT',27)}${right('Rs.'+grand.toFixed(2),15)}\n`;
  if(first.payment_method)out+=`${pad('Payment',27)}${right(first.payment_method==='ONLINE'?'ONLINE':'CASH',15)}\n`;
  out+='------------------------------------------\n';
- out+='\nPowered by HighLoops.in\nwww.highloops.in\n\n\n';
+ out+='\x1b\x61\x01';
+ out+='\nPowered by highloops.in\nwww.highloops.in\n\n\n';
+ out+='\x1b\x61\x00';
  return out;
 }
 function browserReceiptHtml(orderList){
@@ -167,11 +180,12 @@ function browserReceiptHtml(orderList){
  Date & Time: ${fmtDateTime(first.paid_at||first.created_at)}<br>
  Order No: ${isTake?'P-'+String(first.id).slice(0,6).toUpperCase():list.map(o=>String(o.id).slice(0,6).toUpperCase()).join('/')}<br>
  Type: ${isTake?'TAKEAWAY / PARCEL':'DINE IN'}<br>
+ ${isTake?`Source: ${orderSource(first)==='ZOMATO'?'ZOMATO ORDER':'DIRECT'}<br>Token No: ${first.token_number??'-'}<br>`:''}
  ${isTake?(first.customer_name?`Customer: ${first.customer_name}<br>`:''):`Table: ${first.table_no}<br>Chair: ${seatLabel(first)}<br>`}
  </div><table><thead><tr><th>Item</th><th>Qty</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table>
  <div class="total"><span>TOTAL</span><span>${money(grand)}</span></div>
  ${first.payment_method?`<p>Payment: ${first.payment_method==='ONLINE'?'ONLINE PAYMENT':'CASH'}</p>`:''}
- <div class="footer">Powered by HighLoops.in<br>www.highloops.in</div>
+ <div class="footer">Powered by highloops.in<br>www.highloops.in</div>
  <script>window.onload=()=>{setTimeout(()=>window.print(),250)}<\/script></body></html>`;
 }
 function printBrowserReceipt(orderList){
@@ -183,7 +197,7 @@ async function printBluetoothReceipt(orderList){
  const init=new Uint8Array([0x1b,0x40,0x1b,0x61,0x01]);
  let logo=new Uint8Array();
  try{logo=await logoEscPos()}catch{}
- const title=bytes('\nBROTTTA\nSPECIALISED IN PAROTTA\n');
+ const title=bytes('\n');
  const body=bytes(receiptText(orderList));
  const cut=new Uint8Array([0x1d,0x56,0x41,0x03]);
  await writePrinter(concatBytes(init,logo,title,new Uint8Array([0x1b,0x61,0x00]),body,cut));
@@ -235,8 +249,9 @@ function App(){
  const[printerName,setPrinterName]=useState(''),[printerMode,setPrinterMode]=useState(getPrinterMode());
  const[dark,setDark]=useState(()=>localStorage.getItem('brottta-theme')!=='light');
  const role=profile?.role;
- const nav=useMemo(()=>role==='waiter'?[['pos','Take Order'],['ready','Ready Orders'],['orders','Table History']]:role==='chef'?[['kitchen','Kitchen'],['orders','Orders']]:role==='cashier'?[['billing','Bills'],['orders','Orders'],['analytics','Sales']]:[['dashboard','Dashboard'],['pos','Take Order'],['kitchen','Kitchen'],['billing','Bills'],['orders','Table History'],['menu','Food Items'],['employees','Employees'],['attendance','Attendance'],['expenses','Expenses'],['analytics','Analytics']],[role]);
+ const nav=useMemo(()=>getNavForRole(role),[role]);
  useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light';localStorage.setItem('brottta-theme',dark?'dark':'light')},[dark]);
+ useEffect(()=>{if(role&&page)localStorage.setItem(`brottta-last-page-${role}`,page)},[role,page]);
  useEffect(()=>{
    if(!session || !(role==='chef'||role==='waiter')) return;
    const arm=()=>{
@@ -351,7 +366,11 @@ function App(){
    const{data,error}=await supabase.from('profiles').select('*').eq('id',id).single();
    if(error||!data){setMsg('No staff profile found for this login.');await supabase.auth.signOut();return}
    if(data.active===false){setMsg('This staff account is inactive.');await supabase.auth.signOut();return}
-   setProfile(data);setPage(data.role==='waiter'?'pos':data.role==='chef'?'kitchen':data.role==='cashier'?'billing':'dashboard')
+   setProfile(data);
+   const allowed=getNavForRole(data.role).map(x=>x[0]);
+   const fallback=data.role==='waiter'?'pos':data.role==='chef'?'kitchen':data.role==='cashier'?'billing':'dashboard';
+   const saved=localStorage.getItem(`brottta-last-page-${data.role}`);
+   setPage(saved&&allowed.includes(saved)?saved:fallback)
  }
  async function loadAll(){await Promise.all([loadOrders(),loadMenu(),loadEmployees(),loadAttendance(),loadExpenses(),loadSalaryPayments(),loadAdvances()])}
  async function loadOrders(){
@@ -437,7 +456,44 @@ function App(){
    const paidAt=new Date().toISOString();
    const{error}=await supabase.from('orders').update({status:'PAID',paid_at:paidAt,payment_method:paymentMethod}).eq('id',orderId);
    if(error){setMsg(error.message);return false}
+   if(orderType(o)==='DINE_IN'&&o.session_id){
+     const remaining=orders.filter(x=>x.session_id===o.session_id&&x.id!==o.id&&!['PAID','CANCELLED'].includes(x.status));
+     if(!remaining.length){
+       await supabase.from('table_sessions').update({status:'PAID',paid_at:paidAt}).eq('id',o.session_id);
+       setTableResetNotice(`Table ${o.table_no} is now reset and available for a new order.`);
+     }
+   }
    await loadOrders();setMsg(`Bill ${money(total(o))} paid by ${paymentMethod==='CASH'?'Cash':'Online Payment'}. Printing receipt...`);
+   return true;
+ }
+ async function closeUnpaidBill(orderId){
+   const o=orders.find(x=>x.id===orderId);
+   if(!o)return false;
+   if(o.status==='PAID'){setMsg('Paid bills cannot be deleted.');return false}
+   if(o.status==='CANCELLED')return true;
+
+   const label=orderType(o)==='TAKEAWAY'
+     ? `Takeaway / Parcel #${o.id.slice(0,6).toUpperCase()}`
+     : `Table ${o.table_no} — ${seatLabel(o)}`;
+
+   const ok=confirm(`Are you sure you want to delete this unpaid bill?\n\n${label}\nAmount: ${money(total(o))}\n\nThis will remove it from active billing.`);
+   if(!ok)return false;
+
+   const{error}=await supabase.from('orders').update({status:'CANCELLED'}).eq('id',orderId);
+   if(error){setMsg(error.message);return false}
+
+   await supabase.from('order_items').update({status:'CANCELLED'}).eq('order_id',orderId);
+
+   if(orderType(o)==='DINE_IN'&&o.session_id){
+     const remaining=orders.filter(x=>x.session_id===o.session_id&&x.id!==o.id&&!['PAID','CANCELLED'].includes(x.status));
+     if(!remaining.length){
+       await supabase.from('table_sessions').update({status:'CANCELLED'}).eq('id',o.session_id);
+       setTableResetNotice(`Table ${o.table_no} is now reset and available.`);
+     }
+   }
+
+   await loadOrders();
+   setMsg('Unpaid bill deleted.');
    return true;
  }
  async function billSelectedOrders(orderIds){
@@ -583,10 +639,11 @@ function App(){
      {page==='pos'&&<POS menu={menu} table={table} setTable={setTable} chairs={chairs} setChairs={setChairs} cart={cart} addItem={addItem} qty={qty} createOrder={createOrder} orders={orders} closeTable={closeTable} resetNotice={tableResetNotice} deleteItem={deleteOrderItem} updateItem={updateItemStatus}/>}
      {page==='ready'&&<Ready orders={orders} update={updateStatus} updateItem={updateItemStatus}/>}
      {page==='kitchen'&&<Kitchen orders={orders} update={updateStatus} updateItem={updateItemStatus}/>}
-     {page==='billing'&&<Billing orders={orders} menu={menu} pay={payTable} paySingle={paySingleOrder} takeawayCart={takeawayCart} setTakeawayCart={setTakeawayCart} addItem={addItem} qty={qty} createTakeaway={createTakeawayOrder} sendTakeawayToBilling={sendTakeawayToBilling} cancelTakeaway={cancelTakeawayOrder} addTakeawayItem={addTakeawayItem} takeawayQty={takeawayQty} printerName={printerName} connectPrinter={connectPrinter} printerMode={printerMode} changePrinterMode={changePrinterMode}/>} 
+     {page==='billing'&&<Billing orders={orders} menu={menu} pay={payTable} paySingle={paySingleOrder} takeawayCart={takeawayCart} setTakeawayCart={setTakeawayCart} addItem={addItem} qty={qty} createTakeaway={createTakeawayOrder} sendTakeawayToBilling={sendTakeawayToBilling} cancelTakeaway={cancelTakeawayOrder} addTakeawayItem={addTakeawayItem} takeawayQty={takeawayQty} printerName={printerName} connectPrinter={connectPrinter} printerMode={printerMode} changePrinterMode={changePrinterMode} closeUnpaidBill={closeUnpaidBill}/>} 
      {page==='orders'&&<TableHistory orders={orders} update={updateStatus} pay={payTable} role={role} updateItem={updateItemStatus} deleteItem={deleteOrderItem}/>}
      {page==='menu'&&<Menu menu={menu} save={saveMenu} del={deleteMenu}/>}
-     {page==='employees'&&<Employees data={employees} add={addEmployee} update={updateEmployeePay} addAdvance={addAdvance} advances={advances} payments={salaryPayments} attendance={attendance} paySalary={paySalary} deleteAdvance={deleteAdvance}/>}
+     {page==='employees'&&<Employees data={employees} add={addEmployee} addAdvance={addAdvance} advances={advances} deleteAdvance={deleteAdvance}/>}
+     {page==='payroll'&&role==='super_admin'&&<Payroll data={employees} add={addEmployee} update={updateEmployeePay} addAdvance={addAdvance} advances={advances} payments={salaryPayments} attendance={attendance} paySalary={paySalary} deleteAdvance={deleteAdvance}/>} 
      {page==='attendance'&&<Attendance data={employees} records={attendance} mark={markAttendance}/>}
      {page==='expenses'&&<Expenses data={expenses} add={addExpense}/>}
      {page==='analytics'&&<Analytics orders={orders} expenses={expenses}/>}
@@ -686,7 +743,7 @@ function Kitchen({orders,updateItem}){
    return items.length>0 && items.some(i=>!['READY','SERVED'].includes(i.status||'NEW'));
  });
  const card=o=><div className="card" key={o.id}>
-   <div className="cardhead"><h2>{orderType(o)==='TAKEAWAY'?`🥡 PARCEL #${o.id.slice(0,6).toUpperCase()}`:`TABLE ${o.table_no}`}</h2><div className="badgeRow"><span className="orderTypeBadge">{orderTypeLabel(o)}</span>{orderType(o)==='TAKEAWAY'&&<span className={orderSource(o)==='ZOMATO'?'sourceBadge zomato':'sourceBadge'}>{sourceBadge(o)}</span>}{orderType(o)==='TAKEAWAY'&&o.status==='BILL_REQUESTED'&&<span className="kitchenPaymentBadge billed">BILLED</span>}{orderType(o)==='TAKEAWAY'&&o.status==='PAID'&&<span className="kitchenPaymentBadge paid">PAID</span>}</div></div>
+   <div className="cardhead"><h2>{orderType(o)==='TAKEAWAY'?`🥡 PARCEL #${o.id.slice(0,6).toUpperCase()}`:`TABLE ${o.table_no}`}</h2><div className="badgeRow"><span className="orderTypeBadge">{orderTypeLabel(o)}</span>{orderType(o)==='TAKEAWAY'&&<span className={orderSource(o)==='ZOMATO'?'sourceBadge zomato':'sourceBadge'}>{sourceBadge(o)}</span>}{orderType(o)==='TAKEAWAY'&&o.token_number!=null&&<span className="tokenBadge">TOKEN #{o.token_number}</span>}{orderType(o)==='TAKEAWAY'&&o.status==='BILL_REQUESTED'&&<span className="kitchenPaymentBadge billed">BILLED</span>}{orderType(o)==='TAKEAWAY'&&o.status==='PAID'&&<span className="kitchenPaymentBadge paid">PAID</span>}</div></div>
    {orderType(o)==='DINE_IN'&&<span>{seatLabel(o)}</span>}
    {o.customer_name&&<small>Customer: {o.customer_name}{o.customer_phone?` • ${o.customer_phone}`:''}</small>}
    <small>{dt(o.created_at)}</small>
@@ -711,7 +768,7 @@ function Kitchen({orders,updateItem}){
 
 function NativeBluetoothSettings(){
  const [devices,setDevices]=useState([]),[address,setAddress]=useState(getNativeBluetoothAddress()),[loading,setLoading]=useState(false);
- const load=async()=>{setLoading(true);try{setDevices(await listPairedBluetoothPrinters())}finally{setLoading(false)}};
+ const load=async()=>{setLoading(true);try{const list=await listPairedBluetoothPrinters();setDevices(list);if(!list.length)alert('No paired Bluetooth devices were returned. Confirm Android Nearby devices permission is allowed and the printer is paired in Android Settings.')}catch(e){alert(e.message||'Unable to read paired Bluetooth devices.');setDevices([])}finally{setLoading(false)}};
  useEffect(()=>{if(isNativeAndroid())load()},[]);
  if(!isNativeAndroid())return null;
  return <div className="nativeBtSettings">
@@ -720,7 +777,7 @@ function NativeBluetoothSettings(){
    {devices.map(d=><option key={d.address} value={d.address}>{d.name||'Bluetooth Device'} — {d.address}</option>)}
   </select>
   <button className="small" onClick={load}>{loading?'Loading...':'Refresh Paired Devices'}</button>
-  <small>Pair the printer once in Android Bluetooth settings, then select it here.</small>
+  <small>Pair the printer in Android Settings first. On Android 12+, allow Brottta POS → Nearby devices permission when prompted.</small>
  </div>
 }
 
@@ -735,12 +792,12 @@ function WifiPrinterSettings(){
  </div>
 }
 
-function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTakeawayItem,takeawayQty,createTakeaway,sendTakeawayToBilling,cancelTakeaway,printerName,connectPrinter,printerMode,changePrinterMode}){
+function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTakeawayItem,takeawayQty,createTakeaway,sendTakeawayToBilling,cancelTakeaway,printerName,connectPrinter,printerMode,changePrinterMode,closeUnpaidBill}){
  const [openPay,setOpenPay]=useState(null),[expandedHistory,setExpandedHistory]=useState({});
  const [customerName,setCustomerName]=useState(''),[customerPhone,setCustomerPhone]=useState('');
  const [source,setSource]=useState('DIRECT'),[cat,setCat]=useState('All');
  const menuItems=menu||[];
- const dineBills=Object.values(orders.filter(o=>orderType(o)==='DINE_IN'&&o.status==='BILL_REQUESTED').reduce((a,o)=>{const k=o.session_id||`single-${o.id}`;(a[k]??=[]).push(o);return a},{}));
+ const dineBills=orders.filter(o=>orderType(o)==='DINE_IN'&&o.status==='BILL_REQUESTED').sort((a,b)=>Number(a.table_no)-Number(b.table_no)||new Date(a.created_at)-new Date(b.created_at));
  const takeawayBills=orders.filter(o=>orderType(o)==='TAKEAWAY'&&o.status==='BILL_REQUESTED');
  const takeawayOpen=orders.filter(o=>orderType(o)==='TAKEAWAY'&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
  const history=orders.filter(o=>o.status==='PAID').sort((a,b)=>new Date(b.paid_at||b.created_at)-new Date(a.paid_at||a.created_at));
@@ -777,7 +834,13 @@ function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTake
 
   <div className="billingSplit">
    <section><div className="sectionTitle"><h2>🍽️ DINE-IN BILLS</h2><span>{dineBills.length}</span></div>
-    {dineBills.length===0?<div className="empty panel">No active dine-in bills.</div>:dineBills.map(g=>{const grand=g.reduce((s,o)=>s+total(o),0),sid=g[0].session_id||`single-${g[0].id}`;return <div className="card" key={sid}><div className="cardhead"><h2>TABLE {g[0].table_no}</h2><span className="orderTypeBadge">🍽️ DINE IN</span></div>{g.map(o=><div className="ticket" key={o.id}><div className="ticketHead"><b>{seatLabel(o)}</b><small>{dt(o.created_at)}</small></div>{(o.order_items||[]).map(it=><div className="line" key={it.id}><span>{it.item_name} × {it.qty}</span><b>{money(it.line_total)}</b></div>)}</div>)}<div className="grand"><span>TOTAL</span><b>{money(grand)}</b></div><div className="billActionRow"><button className="printBtn compactAction" onClick={()=>printBill(g)}>🖨️ PRINT</button>{payButtons(sid,m=>pay(sid,m),g)}</div></div>})}
+    {dineBills.length===0?<div className="empty panel">No active dine-in bills.</div>:<div className="cards dineBillCards">{dineBills.map(o=><div className="card individualBillCard" key={o.id}>
+      <div className="cardhead"><div><h2>TABLE {o.table_no}</h2><div className="billSeatLabel">{seatLabel(o)}</div></div><span className="orderTypeBadge">🍽️ DINE IN</span></div>
+      <div className="billOrderMeta"><span>Bill #{o.id.slice(0,6).toUpperCase()}</span><small>{dt(o.created_at)}</small></div>
+      {(o.order_items||[]).map(it=><div className="line" key={it.id}><span>{it.item_name} × {it.qty}</span><b>{money(it.line_total)}</b></div>)}
+      <div className="grand"><span>THIS BILL TOTAL</span><b>{money(total(o))}</b></div>
+      <div className="billActionRow"><button className="printBtn compactAction" onClick={()=>printBill(o)}>🖨️ PRINT THIS BILL</button>{payButtons(`dine-${o.id}`,m=>paySingle(o.id,m),o)}<button className="danger compactBtn" onClick={()=>closeUnpaidBill(o.id)}>✕ DELETE UNPAID BILL</button></div>
+    </div>)}</div>}
    </section>
 
    <section><div className="sectionTitle"><h2>🥡 TAKEAWAY / PARCEL</h2><span>{takeawayOpen.length+takeawayBills.length}</span></div>
@@ -794,17 +857,17 @@ function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTake
 
     {takeawayOpen.length>0&&<Panel t="Takeaway Orders in Kitchen"><div className="cards">{takeawayOpen.map(o=><div className="ticket relativeTicket" key={o.id}>
       <button className="iconCancel" title="Cancel order" onClick={()=>cancelTakeaway(o.id)}>×</button>
-      <div className="ticketHead"><b>🥡 PARCEL #{o.id.slice(0,6).toUpperCase()}</b><span className={orderSource(o)==='ZOMATO'?'sourceBadge zomato':'sourceBadge'}>{sourceBadge(o)}</span><span>{STATUS[o.status]}</span><small>{dt(o.created_at)}</small></div>
+      <div className="ticketHead"><b>🥡 PARCEL #{o.id.slice(0,6).toUpperCase()}</b><span className={orderSource(o)==='ZOMATO'?'sourceBadge zomato':'sourceBadge'}>{sourceBadge(o)}</span>{o.token_number!=null&&<span className="tokenBadge">TOKEN #{o.token_number}</span>}<span>{STATUS[o.status]}</span><small>{dt(o.created_at)}</small></div>
       {(o.order_items||[]).map(it=><ItemRow key={it.id} item={it}/>)}
       <div className="grand"><b>{money(total(o))}</b></div><button className="bill compactAction" onClick={()=>sendTakeawayToBilling(o.id)}>🧾 SEND TO BILL — {money(total(o))}</button>
     </div>)}</div></Panel>}
 
     {takeawayBills.length>0&&<Panel t="Takeaway Bills Ready"><div className="cards">{takeawayBills.map(o=><div className="ticket relativeTicket" key={o.id}>
       <button className="iconCancel" title="Cancel order" onClick={()=>cancelTakeaway(o.id)}>×</button>
-      <div className="ticketHead"><b>🥡 PARCEL #{o.id.slice(0,6).toUpperCase()}</b><span className={orderSource(o)==='ZOMATO'?'sourceBadge zomato':'sourceBadge'}>{sourceBadge(o)}</span><small>{dt(o.created_at)}</small></div>
+      <div className="ticketHead"><b>🥡 PARCEL #{o.id.slice(0,6).toUpperCase()}</b><span className={orderSource(o)==='ZOMATO'?'sourceBadge zomato':'sourceBadge'}>{sourceBadge(o)}</span>{o.token_number!=null&&<span className="tokenBadge">TOKEN #{o.token_number}</span>}<small>{dt(o.created_at)}</small></div>
       {o.customer_name&&<small>{o.customer_name}{o.customer_phone?` • ${o.customer_phone}`:''}</small>}
       {(o.order_items||[]).map(it=><div className="line" key={it.id}><span>{it.item_name} × {it.qty}</span><b>{money(it.line_total)}</b></div>)}
-      <div className="grand"><span>TOTAL</span><b>{money(total(o))}</b></div><div className="billActionRow"><button className="printBtn compactAction" onClick={()=>printBill(o)}>🖨️ PRINT</button>{payButtons(`take-${o.id}`,m=>paySingle(o.id,m),o)}</div>
+      <div className="grand"><span>TOTAL</span><b>{money(total(o))}</b></div><div className="billActionRow"><button className="printBtn compactAction" onClick={()=>printBill(o)}>🖨️ PRINT</button>{payButtons(`take-${o.id}`,m=>paySingle(o.id,m),o)}<button className="danger compactBtn" onClick={()=>closeUnpaidBill(o.id)}>✕ DELETE UNPAID BILL</button></div>
     </div>)}</div></Panel>}
    </section>
   </div>
@@ -813,7 +876,7 @@ function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTake
   <Panel>{history.length===0?<div className="empty">No paid bills yet.</div>:<div className="tablewrap"><table><thead><tr><th>Date & Time</th><th>Type</th><th>Source</th><th>Table / Parcel</th><th>Amount</th><th>Payment</th><th>Status</th></tr></thead><tbody>
    {history.map(o=><React.Fragment key={o.id}><tr className="historyRow" onClick={()=>setExpandedHistory(x=>({...x,[o.id]:!x[o.id]}))}>
     <td>{expandedHistory[o.id]?'▼':'▶'} {fmtDateTime(o.paid_at||o.created_at)}</td><td>{orderTypeLabel(o)}</td><td>{orderType(o)==='TAKEAWAY'?sourceBadge(o):'—'}</td><td>{orderType(o)==='TAKEAWAY'?`Parcel #${o.id.slice(0,6).toUpperCase()}`:`Table ${o.table_no} • ${seatLabel(o)}`}</td><td><b>{money(total(o))}</b></td><td><span className="status">{paymentBadge(o.payment_method)}</span></td><td><span className="badge green">PAID</span></td>
-   </tr>{expandedHistory[o.id]&&<tr className="historyDetails"><td colSpan="7"><div className="historyItems"><div className="historyItemsTitle">Bill Items</div>{(o.order_items||[]).map(it=><div className="historyItem" key={it.id}><span>{it.item_name} × {it.qty}</span><span>{money(it.line_total)}</span></div>)}<div className="historyTotal"><span>Total</span><b>{money(total(o))}</b></div><div className="historyMeta"><span>Order: <b>{orderTypeLabel(o)}</b></span>{orderType(o)==='TAKEAWAY'&&<span>Source: <b>{sourceBadge(o)}</b></span>}<span>Payment: <b>{paymentBadge(o.payment_method)}</b></span><span>Paid: {fmtDateTime(o.paid_at||o.created_at)}</span><button className="printBtn small" onClick={e=>{e.stopPropagation();printBill(o)}}>🖨️ REPRINT</button></div></div></td></tr>}</React.Fragment>)}
+   </tr>{expandedHistory[o.id]&&<tr className="historyDetails"><td colSpan="7"><div className="historyItems"><div className="historyItemsTitle">Bill Items</div>{(o.order_items||[]).map(it=><div className="historyItem" key={it.id}><span>{it.item_name} × {it.qty}</span><span>{money(it.line_total)}</span></div>)}<div className="historyTotal"><span>Total</span><b>{money(total(o))}</b></div><div className="historyMeta"><span>Order: <b>{orderTypeLabel(o)}</b></span>{orderType(o)==='TAKEAWAY'&&<span>Source: <b>{sourceBadge(o)}</b></span>}{orderType(o)==='TAKEAWAY'&&o.token_number!=null&&<span>Token: <b>#{o.token_number}</b></span>}<span>Payment: <b>{paymentBadge(o.payment_method)}</b></span><span>Paid: {fmtDateTime(o.paid_at||o.created_at)}</span><button className="printBtn small" onClick={e=>{e.stopPropagation();printBill(o)}}>🖨️ REPRINT</button></div></div></td></tr>}</React.Fragment>)}
   </tbody></table></div>}</Panel>
  </div>
 }
@@ -848,7 +911,31 @@ function Menu({menu,save,del}){
  </>;
 }
 
-function Employees({data,add,update,addAdvance,advances,payments,attendance,paySalary,deleteAdvance}){
+
+function Employees({data,add,addAdvance,advances,deleteAdvance}){
+ const [selected,setSelected]=useState(null),[amount,setAmount]=useState(''),[note,setNote]=useState('');
+ const currentEmployee=selected?(data.find(x=>x.id===selected.id)||selected):null;
+ const lendingFor=e=>advances.filter(a=>a.employee_id===e.id&&Number(a.remaining_amount||0)>0).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+ return <><Title t="Employees" s="Employee directory and lending review"><button className="primary compactBtn" onClick={add}>+ Add Employee</button></Title>
+  <div className="employeeDirectory">
+   {data.filter(e=>e.active!==false).map(e=><div className="card employeeDirectoryCard" key={e.id}>
+    <div><h3>{e.name}</h3></div>
+    <div className="employeeLendingMini"><span>Pending Lending</span><b>{money(e.advance_balance||0)}</b></div>
+    <button className="primary compactBtn" onClick={()=>{setSelected(e);setAmount('');setNote('')}}>Review Lending</button>
+   </div>)}
+  </div>
+  {currentEmployee&&<div className="modalBackdrop" onClick={()=>setSelected(null)}><div className="modalCard compactModal" onClick={e=>e.stopPropagation()}>
+   <div className="modalHead"><div><h2>{currentEmployee.name}</h2><small>Lending review · Pending {money(currentEmployee.advance_balance||0)}</small></div><button className="modalClose" onClick={()=>setSelected(null)}>×</button></div>
+   <div className="modalGrid"><label>New lending amount<input type="number" min="0" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0"/></label><label>Note / Comment<input value={note} onChange={e=>setNote(e.target.value)} placeholder="Reason for lending"/></label></div>
+   <button className="primary compactAction" disabled={!Number(amount)} onClick={async()=>{await addAdvance(currentEmployee,Number(amount||0),note);setAmount('');setNote('')}}>+ Add Lending</button>
+   <div className="advanceReview"><div className="sectionTitle"><h3>Lending History</h3><b>{money(currentEmployee.advance_balance||0)}</b></div>
+    {lendingFor(currentEmployee).length===0?<div className="empty">No pending lending.</div>:lendingFor(currentEmployee).map(a=><div className="advanceRow" key={a.id}><div><b>{money(a.amount)}</b><small>{a.note||'No note'} · Remaining {money(a.remaining_amount)}</small></div><button className="iconDelete" title="Delete lending" onClick={()=>deleteAdvance(a,currentEmployee)}>🗑</button></div>)}
+   </div>
+  </div></div>}
+ </>;
+}
+
+function Payroll({data,add,update,addAdvance,advances,payments,attendance,paySalary,deleteAdvance}){
  const [openPay,setOpenPay]=useState(null),[openAdv,setOpenAdv]=useState(null);
  const [allowance,setAllowance]=useState(0),[incentive,setIncentive]=useState(0),[personalExpense,setPersonalExpense]=useState(0),[deduction,setDeduction]=useState(0);
  const [advanceAmount,setAdvanceAmount]=useState(''),[advanceNote,setAdvanceNote]=useState(''),[payPeriod,setPayPeriod]=useState(null);
@@ -860,9 +947,9 @@ function Employees({data,add,update,addAdvance,advances,payments,attendance,payS
  const payGross=payBase+Number(allowance||0)+Number(incentive||0)-Number(personalExpense||0);
  const payAdvance=Math.min(Math.max(Number(deduction||0),0),Number(reviewEmployee?.advance_balance||0)),payNet=Math.max(payGross-payAdvance,0),payRemaining=Math.max(Number(reviewEmployee?.advance_balance||0)-payAdvance,0);
  const employeeAdvances=e=>advances.filter(a=>a.employee_id===e.id&&Number(a.remaining_amount||0)>0).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
- return <><Title t="Employees" s="Weekly/monthly salary calculation, lending and payment history"><button className="primary compactBtn" onClick={add}>+ Add Employee</button></Title>
+ return <><Title t="Payroll" s="Weekly/monthly salary calculation, attendance-based pay and salary payment history"/>
   <Panel t="Employee Salary Dashboard"><div className="employeeSummaryGrid">{data.filter(e=>e.active!==false).map(e=>{const p=payments.filter(x=>x.employee_id===e.id),week=p.filter(x=>x.payment_type==='WEEKLY').reduce((s,x)=>s+Number(x.net_salary||0),0),month=p.filter(x=>x.payment_type==='MONTHLY').reduce((s,x)=>s+Number(x.net_salary||0),0);return <div className="card" key={e.id}><div><b>{e.name}</b> <span className="roleSpace">{e.role}</span></div><small>{e.payment_type||'WEEKLY'} · {money(e.per_day_salary||0)}/day</small><div className="salaryMini"><span>Weekly paid <b>{money(week)}</b></span><span>Monthly paid <b>{money(month)}</b></span><span>Pending lending <b>{money(e.advance_balance)}</b></span></div></div>})}</div></Panel>
-  <Panel t="Employee Payment Settings"><div className="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Payment Type</th><th>Per Day</th><th>Current Period</th><th>Lending</th><th>Actions</th></tr></thead><tbody>{data.map(e=>{const current=salaryPeriod(e.payment_type||'WEEKLY'),paid=payments.some(p=>p.employee_id===e.id&&p.payment_type===(e.payment_type||'WEEKLY')&&p.period_start===current.start&&p.period_end===current.end&&p.status==='PAID');return <tr key={e.id}><td><b>{e.name}</b></td><td>{e.role}</td><td><div className="payToggle"><button className={(e.payment_type||'WEEKLY')==='WEEKLY'?'on':''} onClick={()=>update(e,{payment_type:'WEEKLY'})}>Weekly</button><button className={(e.payment_type||'WEEKLY')==='MONTHLY'?'on':''} onClick={()=>update(e,{payment_type:'MONTHLY'})}>Monthly</button></div></td><td><input className="inlineInput" type="number" min="0" defaultValue={e.per_day_salary||0} onBlur={x=>update(e,{per_day_salary:Number(x.target.value||0)})}/></td><td><small>{current.label}</small></td><td>{money(e.advance_balance||0)}</td><td><div className="rowActions"><button className="small" onClick={()=>{setOpenAdv(e);setAdvanceAmount('');setAdvanceNote('')}}>+ Lending</button><button className="small primary" onClick={()=>openSalary(e)}>Review Salary</button>{paid&&<span className="paidBadge">✓ PAID</span>}</div></td></tr>})}</tbody></table></div></Panel>
+  <Panel t="Employee Payment Settings"><div className="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Payment Type</th><th>Per Day</th><th>Current Period</th><th>Lending</th><th>Actions</th></tr></thead><tbody>{data.map(e=>{const current=salaryPeriod(e.payment_type||'WEEKLY'),paid=payments.some(p=>p.employee_id===e.id&&p.payment_type===(e.payment_type||'WEEKLY')&&p.period_start===current.start&&p.period_end===current.end&&p.status==='PAID');return <tr key={e.id}><td><b>{e.name}</b></td><td>{e.role}</td><td><div className="payToggle"><button className={(e.payment_type||'WEEKLY')==='WEEKLY'?'on':''} onClick={()=>update(e,{payment_type:'WEEKLY'})}>Weekly</button><button className={(e.payment_type||'WEEKLY')==='MONTHLY'?'on':''} onClick={()=>update(e,{payment_type:'MONTHLY'})}>Monthly</button></div></td><td><input className="inlineInput" type="number" min="0" defaultValue={e.per_day_salary||0} onBlur={x=>update(e,{per_day_salary:Number(x.target.value||0)})}/></td><td><small>{current.label}</small></td><td>{money(e.advance_balance||0)}</td><td><div className="rowActions"><button className="small primary" onClick={()=>openSalary(e)}>Review Salary</button>{paid&&<span className="paidBadge">✓ PAID</span>}</div></td></tr>})}</tbody></table></div></Panel>
   <Panel t="Salary Payment History"><div className="tablewrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Period</th><th>Days</th><th>Gross</th><th>Advance</th><th>Net</th><th>Status</th></tr></thead><tbody>{payments.map(p=>{const e=data.find(x=>x.id===p.employee_id);return <tr key={p.id}><td>{e?.name||'—'}</td><td>{p.payment_type}</td><td>{fmtDate(p.period_start)} → {fmtDate(p.period_end)}</td><td>{p.present_days}</td><td>{money(p.gross_salary)}</td><td>{money(p.advance_deduction)}</td><td><b>{money(p.net_salary)}</b></td><td><span className="paidBadge">✓ PAID</span></td></tr>})}</tbody></table></div></Panel>
 
   {openAdv&&<div className="modalBackdrop" onClick={()=>setOpenAdv(null)}><div className="modalCard compactModal" onClick={e=>e.stopPropagation()}><div className="modalHead"><div><h2>Add Lending</h2><small>{openAdv.name} · Pending {money(openAdv.advance_balance||0)}</small></div><button className="modalClose" onClick={()=>setOpenAdv(null)}>×</button></div><label>Amount<input type="number" min="0" value={advanceAmount} onChange={e=>setAdvanceAmount(e.target.value)}/></label><label>Note / Comment<input value={advanceNote} onChange={e=>setAdvanceNote(e.target.value)} placeholder="e.g. Festival advance"/></label><button className="primary compactAction" onClick={async()=>{await addAdvance(openAdv,Number(advanceAmount||0),advanceNote);setOpenAdv(null)}}>Add Lending</button></div></div>}
