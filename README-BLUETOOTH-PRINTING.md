@@ -1,50 +1,64 @@
-# Brottta POS - Bluetooth Receipt Printing
+# Brottta Restaurant POS v2
 
-## Receipt format
-The 80mm bill includes:
-- BROTTTA logo converted to black/white for ESC/POS printing
-- Date and time
-- Order number
-- Dine-In / Takeaway (Parcel)
-- Table and chair/group for Dine-In
-- Customer name for Takeaway when available
-- Item, quantity and amount
-- Total amount
-- Payment mode when already paid
-- `Powered by HighLoops.in`
-- `www.highloops.in`
+## Main workflow
+1. Waiter selects a table.
+2. Waiter adds food and sends a ticket to kitchen.
+3. The same table can receive unlimited additional order tickets.
+4. The waiter sees the complete open table history and running total.
+5. Chef sees every ticket separately and marks it READY.
+6. Waiter sees which table's ticket is ready and marks it SERVED.
+7. When the customer is done, waiter clicks **CLOSE TABLE & SEND BILL TO CASHIER**.
+8. The cashier receives one consolidated bill for the entire table. There is no CASH/UPI/CARD prompt when the waiter closes the table.
+9. Cashier collects payment and marks the complete table PAID.
 
-The BROTTTA logo is also shown on the login screen, application header and dashboard.
+## Dark theme
+Use the Light/Dark button in the top-right. The choice is saved in the browser.
 
-## Bluetooth connection
+## Setup
+npm install
+copy .env.example .env
+npm run dev
 
-Use the `Connect Printer` button from the top header or Billing page.
+Then run `supabase/schema.sql` in the Supabase SQL Editor.
 
-The direct Bluetooth implementation uses the browser Web Bluetooth API and ESC/POS commands. It works with printers that expose a BLE GATT writable characteristic.
 
-Recommended test:
-1. Open the POS using Chrome/Edge on Android.
-2. Turn on Bluetooth and the thermal printer.
-3. Open Billing.
-4. Tap `Connect Printer`.
-5. Select the thermal printer.
-6. Tap `Print Bill`.
+## Automatic table reset
+A table follows this lifecycle:
 
-### Important printer compatibility
-Some 80mm POS printers advertise "Bluetooth" but only implement Bluetooth Classic/SPP. Chrome Web Bluetooth only talks to BLE/GATT devices. If your printer is Bluetooth Classic only, the app automatically offers **Browser/System Print** as a fallback after direct Bluetooth fails.
+OPEN → waiter closes table → BILL_REQUESTED → cashier collects payment → PAID/RESET.
 
-For guaranteed direct printing to a Bluetooth Classic thermal printer, package the POS as an Android APK with a native Bluetooth/ESC-POS plugin.
+The historical orders remain in Supabase for analytics. The table has no active session after payment, so it is available for a completely new order. The waiter does not need to manually delete or clear old orders.
 
-## Browser printing fallback
 
-If Bluetooth direct printing fails, choose **OK** when the app asks to use browser/system printing. The receipt opens in an 80mm print layout with the same logo and bill fields.
+# Brottta POS v4 changes
 
-## GitHub/Vercel
-Do not upload:
-- `node_modules`
-- `.env`
-- `dist`
+## Run the updated database migration
+Run `supabase/schema.sql` in Supabase SQL Editor. This adds:
+- Per-item kitchen status (`NEW`, `PREPARING`, `READY`, `SERVED`)
+- Seat selection (`ENTIRE TABLE` or Chair 1-4 / combinations)
+- Seat labels on every order
+- Served timestamps
 
-Keep these Vercel environment variables:
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+## New workflow
+1. Waiter selects a table.
+2. Waiter selects Entire Table or one/more chairs.
+3. Each ticket is sent to kitchen with its seat label.
+4. Chef updates each item independently; items can be made Ready immediately or moved through Preparing.
+5. Kitchen INSERT and waiter READY events trigger a short sound and the UI also auto-refreshes every 5 seconds.
+6. Waiter can remove individual items until the table is closed/billed.
+7. Waiter sees green Ready/Served badges and red Pending/Preparing badges per item.
+8. Closing a table sends the complete table bill to cashier.
+9. Cashier payment marks the session PAID and the table is automatically available for a new session.
+10. Menu management now uses a side drawer for Add/Edit, plus Enable/Disable and Delete.
+
+Note: browser sound notifications require the device/browser to allow audio. The first login/user interaction provides the required browser interaction for most devices.
+
+
+## v5 additions
+- Menu stock control (`out_of_stock`) so unavailable food is hidden from waiter ordering.
+- Order/bill date and time.
+- Cash / Online Payment selection at cashier.
+- Payment method stored against paid bills.
+- Date-range sales analytics with Cash vs Online totals.
+- Historical paid bills remain available for trend reporting.
+- Run the updated `supabase/schema.sql` before using v5.
