@@ -162,7 +162,10 @@ function receiptText(orderList){
  if(first.payment_method)out+=`${pad('Payment',27)}${right(first.payment_method==='ONLINE'?'ONLINE':'CASH',15)}\n`;
  out+='------------------------------------------\n';
  out+='\x1b\x61\x01';
- out+='\nPowered by highloops.in\nwww.highloops.in\n\n\n';
+ out+='\x1b\x45\x01';
+ out+='\nPowered by Highloops\n';
+ out+='\x1b\x45\x00';
+ out+='www.highloops.in\n\n\n';
  out+='\x1b\x61\x00';
  return out;
 }
@@ -185,7 +188,7 @@ function browserReceiptHtml(orderList){
  </div><table><thead><tr><th>Item</th><th>Qty</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table>
  <div class="total"><span>TOTAL</span><span>${money(grand)}</span></div>
  ${first.payment_method?`<p>Payment: ${first.payment_method==='ONLINE'?'ONLINE PAYMENT':'CASH'}</p>`:''}
- <div class="footer">Powered by highloops.in<br>www.highloops.in</div>
+ <div class="footer"><strong>Powered by Highloops</strong><br><span>www.highloops.in</span></div>
  <script>window.onload=()=>{setTimeout(()=>window.print(),250)}<\/script></body></html>`;
 }
 function printBrowserReceipt(orderList){

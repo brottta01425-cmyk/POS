@@ -192,4 +192,25 @@ for(const p of perms){
   if(!xml.includes(p)) xml=xml.replace('<application',p+'\\n    <application');
 }
 fs.writeFileSync(manifest,xml);
-console.log('Native Bluetooth Classic + Wi-Fi printer plugin installed.');
+
+// Apply Brottta Android launcher icon after Capacitor creates/updates the Android project.
+const iconRoot=path.join(root,'android-assets');
+const resRoot=path.join(root,'android','app','src','main','res');
+const densities=['mdpi','hdpi','xhdpi','xxhdpi','xxxhdpi'];
+for(const density of densities){
+  const fromDir=path.join(iconRoot,`mipmap-${density}`);
+  const toDir=path.join(resRoot,`mipmap-${density}`);
+  fs.mkdirSync(toDir,{recursive:true});
+  for(const file of ['ic_launcher.png','ic_launcher_round.png']){
+    const src=path.join(fromDir,file);
+    if(fs.existsSync(src))fs.copyFileSync(src,path.join(toDir,file));
+  }
+}
+// Remove Capacitor's adaptive launcher XML so Android uses the supplied branded PNG at all API levels.
+const anydpi=path.join(resRoot,'mipmap-anydpi-v26');
+for(const file of ['ic_launcher.xml','ic_launcher_round.xml']){
+  const p=path.join(anydpi,file);
+  if(fs.existsSync(p))fs.unlinkSync(p);
+}
+
+console.log('Native Bluetooth Classic + Wi-Fi printer plugin and Brottta app icon installed.');

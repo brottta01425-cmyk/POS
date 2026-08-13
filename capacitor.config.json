@@ -1,0 +1,8 @@
+{
+  "appId": "in.highloops.brottta",
+  "appName": "Brottta POS",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true
+  }
+}
