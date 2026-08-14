@@ -435,3 +435,18 @@ button{min-height:32px}
 .billActionRow .danger.compactBtn{background:#7f1d1d;color:#fff;border:1px solid #b91c1c}
 .billActionRow .danger.compactBtn:hover{background:#991b1b}
 @media(max-width:640px){.billActionRow .danger.compactBtn{width:100%}}
+
+/* ===== v18.4 Clubbed billing + Counter Dine-In ===== */
+.counterDineInfo{margin:8px 0 12px;padding:9px 11px;border:1px solid var(--orange);border-radius:9px;background:var(--orangeSoft);color:var(--text);font-size:11px;line-height:1.4}
+.sourceBadge.dineInSource{background:var(--orangeSoft);color:var(--orange);border-color:var(--orange)}
+.clubbedOrder{padding:5px 0;border-bottom:1px dashed var(--border)}
+.clubbedOrder:last-of-type{border-bottom:0}
+.clubbedOrderLabel{display:block;color:var(--orange);font-weight:800;margin:3px 0 5px}
+.billCheck b{line-height:1.3}
+@media(max-width:640px){.counterDineInfo{font-size:10px}}
+
+.directPaymentModal{width:min(500px,96vw)!important}
+.directBillItems{max-height:260px;overflow:auto;margin:8px 0}
+.directPaymentActions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.directPaymentActions .paymentBtn{min-height:42px;font-size:13px;font-weight:900}
+@media(max-width:520px){.directPaymentActions{grid-template-columns:1fr}.directPaymentActions .paymentBtn{min-height:38px}}

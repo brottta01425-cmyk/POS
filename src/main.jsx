@@ -3,6 +3,8 @@ import{createRoot}from'react-dom/client';
 import{supabase}from'./supabase';
 import * as XLSX from 'xlsx';
 import { isNativeAndroid, listPairedBluetoothPrinters, nativePrintBluetooth, nativePrintWifi, nativeTestWifi, nativeTestBluetooth } from './nativePrinter';
+import { LocalNotifications } from '@capacitor/local-notifications';
+import { App as CapApp } from '@capacitor/app';
 import'./styles.css';
 
 const ROLES={super_admin:'Super Admin',admin:'Admin',waiter:'Waiter',chef:'Chef',cashier:'Cashier'};
@@ -18,10 +20,11 @@ const TABLES=Array.from({length:20},(_,i)=>i+1);
 const STATUS={NEW:'New',PREPARING:'Preparing',READY:'Ready',SERVED:'Served',BILL_REQUESTED:'Bill Ready',PAID:'Paid',CANCELLED:'Cancelled'};
 const ITEM_STATUS={NEW:'Pending',PREPARING:'Preparing',READY:'Ready',SERVED:'Served',CANCELLED:'Cancelled'};
 const ORDER_TYPES={DINE_IN:'🍽️ DINE IN',TAKEAWAY:'🥡 TAKEAWAY / PARCEL'};
-const orderType=o=>o?.order_type==='TAKEAWAY'?'TAKEAWAY':'DINE_IN';
+const orderSource=o=>o?.order_source==='DINE_IN'?'DINE_IN':o?.order_source==='ZOMATO'?'ZOMATO':'DIRECT';
+const orderType=o=>orderSource(o)==='DINE_IN'?'DINE_IN':o?.order_type==='TAKEAWAY'?'TAKEAWAY':'DINE_IN';
 const orderTypeLabel=o=>ORDER_TYPES[orderType(o)];
-const orderSource=o=>o?.order_source==='ZOMATO'?'ZOMATO':'DIRECT';
-const sourceBadge=o=>orderSource(o)==='ZOMATO'?'🟠 ZOMATO ORDER':'DIRECT';
+const sourceBadge=o=>orderSource(o)==='DINE_IN'?'🍽️ DINE-IN':orderSource(o)==='ZOMATO'?'ZOMATO':'DIRECT';
+const isCounterDineIn=o=>orderSource(o)==='DINE_IN';
 
 
 const PRINTER_MODE_KEY='brottta-printer-mode';
@@ -151,7 +154,10 @@ function receiptText(orderList){
    out+=`Source : ${orderSource(first)==='ZOMATO'?'ZOMATO ORDER':'DIRECT'}\n`;
    out+=`Token No : ${first.token_number??'-'}\n`;
  }
- if(!isTake){out+=`Table : ${first.table_no}\n`;out+=`Chair : ${seatLabel(first)}\n`}
+ if(!isTake){
+   if(isCounterDineIn(first))out+=`Service : COUNTER DINE-IN\n`;
+   else {out+=`Table : ${first.table_no}\n`;out+=`Chair : ${seatLabel(first)}\n`}
+ }
  else if(first.customer_name){out+=`Customer : ${first.customer_name}\n`}
  out+='------------------------------------------\n';
  out+=`${pad('Item',24)}${right('Qty',5)}${right('Amount',13)}\n`;
@@ -184,7 +190,7 @@ function browserReceiptHtml(orderList){
  Order No: ${isTake?'P-'+String(first.id).slice(0,6).toUpperCase():list.map(o=>String(o.id).slice(0,6).toUpperCase()).join('/')}<br>
  Type: ${isTake?'TAKEAWAY / PARCEL':'DINE IN'}<br>
  ${isTake?`Source: ${orderSource(first)==='ZOMATO'?'ZOMATO ORDER':'DIRECT'}<br>Token No: ${first.token_number??'-'}<br>`:''}
- ${isTake?(first.customer_name?`Customer: ${first.customer_name}<br>`:''):`Table: ${first.table_no}<br>Chair: ${seatLabel(first)}<br>`}
+ ${isTake?(first.customer_name?`Customer: ${first.customer_name}<br>`:''):(isCounterDineIn(first)?`Service: COUNTER DINE-IN<br>`:`Table: ${first.table_no}<br>Chair: ${seatLabel(first)}<br>`)}
  </div><table><thead><tr><th>Item</th><th>Qty</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table>
  <div class="total"><span>TOTAL</span><span>${money(grand)}</span></div>
  ${first.payment_method?`<p>Payment: ${first.payment_method==='ONLINE'?'ONLINE PAYMENT':'CASH'}</p>`:''}
@@ -242,11 +248,37 @@ function salaryPeriod(type, ref=new Date()){
 const dt=v=>v?new Date(v).toLocaleString('en-IN',{dateStyle:'short',timeStyle:'short'}):'-';
 const total=o=>Number(o?.total||0);
 
+
+async function ensureAndroidNotificationPermission(){
+ if(!isNativeAndroid())return false;
+ try{
+   const current=await LocalNotifications.checkPermissions();
+   if(current.display==='granted')return true;
+   const requested=await LocalNotifications.requestPermissions();
+   return requested.display==='granted';
+ }catch{return false}
+}
+async function showAndroidNotification(title,body,id=Date.now()%2147483647){
+ if(!isNativeAndroid())return;
+ try{
+   const allowed=await ensureAndroidNotificationPermission();
+   if(!allowed)return;
+   await LocalNotifications.schedule({notifications:[{
+     id:Number(id),
+     title,
+     body,
+     schedule:{at:new Date(Date.now()+250)},
+     sound:'default'
+   }]});
+ }catch(e){console.warn('Local notification failed',e)}
+}
+
 function App(){
  const[session,setSession]=useState(null),[profile,setProfile]=useState(null),[loading,setLoading]=useState(true),[page,setPage]=useState('dashboard'),[msg,setMsg]=useState('');
  const[orders,setOrders]=useState([]),[menu,setMenu]=useState([]),[employees,setEmployees]=useState([]),[attendance,setAttendance]=useState([]),[expenses,setExpenses]=useState([]),[salaryPayments,setSalaryPayments]=useState([]),[advances,setAdvances]=useState([]);
  const[table,setTable]=useState(null),[chairs,setChairs]=useState([]),[cart,setCart]=useState([]),[takeawayCart,setTakeawayCart]=useState([]),[loginRole,setLoginRole]=useState('waiter'),[tableResetNotice,setTableResetNotice]=useState('');
- const previousOrderIds=React.useRef(null),previousItemStates=React.useRef(null),liveReady=React.useRef(false);
+ const previousOrderIds=React.useRef(null),previousItemStates=React.useRef(null),previousOrderStatuses=React.useRef(null),liveReady=React.useRef(false);
+ const appIsActive=React.useRef(true);
  const audioCtx=React.useRef(null);
  const[soundEnabled,setSoundEnabled]=useState(false);
  const[printerName,setPrinterName]=useState(''),[printerMode,setPrinterMode]=useState(getPrinterMode());
@@ -255,6 +287,23 @@ function App(){
  const nav=useMemo(()=>getNavForRole(role),[role]);
  useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light';localStorage.setItem('brottta-theme',dark?'dark':'light')},[dark]);
  useEffect(()=>{if(role&&page)localStorage.setItem(`brottta-last-page-${role}`,page)},[role,page]);
+ useEffect(()=>{
+   if(!msg)return;
+   const timer=setTimeout(()=>setMsg(''),3000);
+   return()=>clearTimeout(timer);
+ },[msg]);
+ useEffect(()=>{
+   if(!session||!['cashier','chef','waiter'].includes(role))return;
+   if(isNativeAndroid())ensureAndroidNotificationPermission();
+   let handle;
+   if(isNativeAndroid()){
+     CapApp.addListener('appStateChange',({isActive})=>{appIsActive.current=isActive}).then(h=>{handle=h});
+   }
+   const onVisibility=()=>{appIsActive.current=!document.hidden};
+   document.addEventListener('visibilitychange',onVisibility);
+   onVisibility();
+   return()=>{document.removeEventListener('visibilitychange',onVisibility);if(handle)handle.remove()};
+ },[session,role]);
  useEffect(()=>{
    if(!session || !(role==='chef'||role==='waiter')) return;
    const arm=()=>{
@@ -289,36 +338,72 @@ function App(){
    // Realtime is used for instant refresh, while polling detects notifications
    // reliably even when a browser misses a realtime event.
    const checkNotifications=async()=>{
-     const{data,error}=await supabase.from('orders').select('id,created_at,status,order_items(id,status)').order('created_at',{ascending:false});
+     const{data,error}=await supabase.from('orders').select('id,created_at,status,order_type,order_source,table_no,seat_label,order_items(id,status)').order('created_at',{ascending:false});
      if(error)return;
      const list=data||[];
      const orderIds=new Set(list.map(o=>o.id));
-     const itemStates=new Map();
-     list.forEach(o=>(o.order_items||[]).forEach(i=>itemStates.set(i.id,i.status)));
+     const itemStates=new Map(),orderStatuses=new Map();
+     list.forEach(o=>{
+       orderStatuses.set(o.id,o.status);
+       (o.order_items||[]).forEach(i=>itemStates.set(i.id,i.status));
+     });
 
      if(previousOrderIds.current===null){
        previousOrderIds.current=orderIds;
        previousItemStates.current=itemStates;
+       previousOrderStatuses.current=orderStatuses;
        liveReady.current=true;
        return;
      }
 
-     if(soundEnabled){
-       if(role==='chef'){
-         const newOrders=list.filter(o=>!previousOrderIds.current.has(o.id) && o.status!=='PAID' && o.status!=='CANCELLED');
-         if(newOrders.length) beep(audioCtx.current);
+     const appAway=document.hidden||!appIsActive.current;
+
+     if(role==='chef'){
+       const newOrders=list.filter(o=>
+         !previousOrderIds.current.has(o.id) &&
+         o.status!=='PAID' && o.status!=='CANCELLED' &&
+         !(o.order_source==='DINE_IN' && o.table_no==null)
+       );
+       if(newOrders.length){
+         if(soundEnabled&&!appAway)beep(audioCtx.current);
+         if(appAway)showAndroidNotification(
+           '👨‍🍳 New Kitchen Order',
+           `${newOrders.length} new order${newOrders.length>1?'s':''} received. Open Kitchen to view.`
+         );
        }
-       if(role==='waiter'){
-         let readyChanged=false;
-         itemStates.forEach((status,id)=>{
-           if(status==='READY' && previousItemStates.current.get(id)!=='READY') readyChanged=true;
-         });
-         if(readyChanged) beep(audioCtx.current);
+     }
+
+     if(role==='waiter'){
+       let readyCount=0;
+       itemStates.forEach((status,id)=>{
+         if(status==='READY' && previousItemStates.current.get(id)!=='READY')readyCount++;
+       });
+       if(readyCount){
+         if(soundEnabled&&!appAway)beep(audioCtx.current);
+         if(appAway)showAndroidNotification(
+           '🔔 Order Ready',
+           `${readyCount} item${readyCount>1?'s are':' is'} ready to serve.`
+         );
+       }
+     }
+
+     if(role==='cashier'){
+       const newBills=list.filter(o=>
+         o.status==='BILL_REQUESTED' &&
+         previousOrderStatuses.current?.get(o.id)!=='BILL_REQUESTED'
+       );
+       if(newBills.length){
+         if(soundEnabled&&!appAway)beep(audioCtx.current);
+         if(appAway)showAndroidNotification(
+           '🧾 Bill Ready',
+           `${newBills.length} new bill${newBills.length>1?'s':''} waiting for payment.`
+         );
        }
      }
 
      previousOrderIds.current=orderIds;
      previousItemStates.current=itemStates;
+     previousOrderStatuses.current=orderStatuses;
      loadOrders();
    };
 
@@ -413,28 +498,36 @@ function App(){
    setCart([]);await loadOrders();setMsg(`Table ${table} ${seatLabel}: order sent to kitchen.`)
  }
  async function createTakeawayOrder(customerName='',customerPhone='',orderSourceValue='DIRECT'){
-   if(!takeawayCart.length){setMsg('Add food items to the takeaway order.');return null}
+   if(!takeawayCart.length){setMsg('Add food items to the order.');return null}
+   const counterDineIn=orderSourceValue==='DINE_IN';
    const ttotal=takeawayCart.reduce((s,x)=>s+Number(x.price)*x.qty,0);
    const{data:o,error}=await supabase.from('orders').insert({
      order_type:'TAKEAWAY',
      table_no:null,
      session_id:null,
-     status:'NEW',
+     status:counterDineIn?'BILL_REQUESTED':'NEW',
      total:ttotal,
      created_by:session.user.id,
-     seat_label:'TAKEAWAY',
+     seat_label:counterDineIn?'COUNTER':'TAKEAWAY',
      chairs:[],
      customer_name:customerName||null,
      customer_phone:customerPhone||null,
-     order_source:orderSourceValue==='ZOMATO'?'ZOMATO':'DIRECT'
+     order_source:counterDineIn?'DINE_IN':'DIRECT'
    }).select().single();
    if(error){setMsg(error.message);return null}
-   const{error:e}=await supabase.from('order_items').insert(takeawayCart.map(x=>({
+   const itemRows=takeawayCart.map(x=>({
      order_id:o.id,menu_item_id:x.id,item_name:x.name,unit_price:Number(x.price),qty:x.qty,
-     line_total:Number(x.price)*x.qty,status:'NEW'
-   })));
+     line_total:Number(x.price)*x.qty,status:counterDineIn?'SERVED':'NEW'
+   }));
+   const{data:insertedItems,error:e}=await supabase.from('order_items').insert(itemRows).select('*');
    if(e){await supabase.from('orders').delete().eq('id',o.id);setMsg(e.message);return null}
-   setTakeawayCart([]);await loadOrders();setMsg(`Takeaway ${o.id.slice(0,6).toUpperCase()} sent to kitchen.`);return o;
+   const createdOrder={...o,order_items:insertedItems||itemRows};
+   setTakeawayCart([]);
+   await loadOrders();
+   setMsg(counterDineIn
+     ? `Counter Dine-In bill ${money(ttotal)} created. Select payment method.`
+     : `Takeaway ${o.id.slice(0,6).toUpperCase()} sent to kitchen.`);
+   return createdOrder;
  }
  async function cancelTakeawayOrder(orderId){
    const o=orders.find(x=>x.id===orderId);
@@ -499,15 +592,62 @@ function App(){
    setMsg('Unpaid bill deleted.');
    return true;
  }
+ async function payOrderGroup(orderIds,paymentMethod){
+   if(!['CASH','ONLINE'].includes(paymentMethod)){setMsg('Select Cash or Online Payment.');return false}
+   const group=orders.filter(o=>orderIds.includes(o.id)&&o.status==='BILL_REQUESTED');
+   if(!group.length){setMsg('This bill is no longer available for payment.');return false}
+   const paidAt=new Date().toISOString();
+   const{error}=await supabase.from('orders').update({status:'PAID',paid_at:paidAt,payment_method:paymentMethod}).in('id',group.map(o=>o.id));
+   if(error){setMsg(error.message);return false}
+   const sessionId=group[0].session_id;
+   if(sessionId){
+     const remaining=orders.filter(o=>o.session_id===sessionId&&!group.some(g=>g.id===o.id)&&!['PAID','CANCELLED'].includes(o.status));
+     if(!remaining.length){
+       await supabase.from('table_sessions').update({status:'PAID',paid_at:paidAt}).eq('id',sessionId);
+       setTableResetNotice(`Table ${group[0].table_no} is now reset and available for a new order.`);
+     }
+   }
+   await loadOrders();
+   setMsg(`Bill ${money(group.reduce((s,o)=>s+total(o),0))} paid by ${paymentMethod==='CASH'?'Cash':'Online Payment'}. Printing receipt...`);
+   return true;
+ }
+
+ async function closeUnpaidBillGroup(orderIds){
+   const group=orders.filter(o=>orderIds.includes(o.id)&&o.status!=='PAID'&&o.status!=='CANCELLED');
+   if(!group.length)return false;
+   const first=group[0],amount=group.reduce((s,o)=>s+total(o),0);
+   const label=isCounterDineIn(first)?'Counter Dine-In':`Table ${first.table_no} — ${seatLabel(first)}`;
+   const ok=confirm(`Are you sure you want to delete this unpaid bill?\n\n${label}\n${group.length} order${group.length>1?'s':''} clubbed\nAmount: ${money(amount)}\n\nThis will remove the complete bill from active billing.`);
+   if(!ok)return false;
+   const ids=group.map(o=>o.id);
+   const{error}=await supabase.from('orders').update({status:'CANCELLED'}).in('id',ids);
+   if(error){setMsg(error.message);return false}
+   await supabase.from('order_items').update({status:'CANCELLED'}).in('order_id',ids);
+   if(first.session_id){
+     const remaining=orders.filter(o=>o.session_id===first.session_id&&!ids.includes(o.id)&&!['PAID','CANCELLED'].includes(o.status));
+     if(!remaining.length){
+       await supabase.from('table_sessions').update({status:'CANCELLED'}).eq('id',first.session_id);
+       setTableResetNotice(`Table ${first.table_no} is now reset and available.`);
+     }
+   }
+   await loadOrders();setMsg('Unpaid bill deleted.');return true;
+ }
+
  async function billSelectedOrders(orderIds){
-   if(!orderIds?.length)return setMsg('Select at least one order to send for billing.');
-   const selected=orders.filter(o=>orderIds.includes(o.id)&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
-   if(!selected.length)return setMsg('Selected orders are already billed or closed.');
-   const sessionId=selected[0].session_id;
+   if(!orderIds?.length)return setMsg('Select at least one chair/group to send for billing.');
+   const requested=orders.filter(o=>orderIds.includes(o.id)&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
+   if(!requested.length)return setMsg('Selected orders are already billed or closed.');
+
+   const keys=new Set(requested.map(o=>`${o.session_id||o.table_no}|${seatLabel(o)}`));
+   const selected=orders.filter(o=>
+     !['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status) &&
+     keys.has(`${o.session_id||o.table_no}|${seatLabel(o)}`)
+   );
    const{error}=await supabase.from('orders').update({status:'BILL_REQUESTED'}).in('id',selected.map(o=>o.id));
    if(error){setMsg(error.message);return}
    await loadOrders();
-   setMsg(`${selected.length} selected order${selected.length>1?'s':''} sent to cashier for ${money(selected.reduce((s,o)=>s+total(o),0))}.`);
+   const billGroups=new Set(selected.map(o=>`${o.session_id||o.table_no}|${seatLabel(o)}`)).size;
+   setMsg(`${billGroups} bill${billGroups>1?'s':''} sent to cashier. ${selected.length} order ticket${selected.length>1?'s':''} clubbed for ${money(selected.reduce((s,o)=>s+total(o),0))}.`);
  }
  async function closeTable(tableNo,selectedIds=null){
    const open=orders.filter(o=>Number(o.table_no)===Number(tableNo)&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
@@ -642,7 +782,7 @@ function App(){
      {page==='pos'&&<POS menu={menu} table={table} setTable={setTable} chairs={chairs} setChairs={setChairs} cart={cart} addItem={addItem} qty={qty} createOrder={createOrder} orders={orders} closeTable={closeTable} resetNotice={tableResetNotice} deleteItem={deleteOrderItem} updateItem={updateItemStatus}/>}
      {page==='ready'&&<Ready orders={orders} update={updateStatus} updateItem={updateItemStatus}/>}
      {page==='kitchen'&&<Kitchen orders={orders} update={updateStatus} updateItem={updateItemStatus}/>}
-     {page==='billing'&&<Billing orders={orders} menu={menu} pay={payTable} paySingle={paySingleOrder} takeawayCart={takeawayCart} setTakeawayCart={setTakeawayCart} addItem={addItem} qty={qty} createTakeaway={createTakeawayOrder} sendTakeawayToBilling={sendTakeawayToBilling} cancelTakeaway={cancelTakeawayOrder} addTakeawayItem={addTakeawayItem} takeawayQty={takeawayQty} printerName={printerName} connectPrinter={connectPrinter} printerMode={printerMode} changePrinterMode={changePrinterMode} closeUnpaidBill={closeUnpaidBill}/>} 
+     {page==='billing'&&<Billing orders={orders} menu={menu} pay={payTable} paySingle={paySingleOrder} takeawayCart={takeawayCart} setTakeawayCart={setTakeawayCart} addItem={addItem} qty={qty} createTakeaway={createTakeawayOrder} sendTakeawayToBilling={sendTakeawayToBilling} cancelTakeaway={cancelTakeawayOrder} addTakeawayItem={addTakeawayItem} takeawayQty={takeawayQty} printerName={printerName} connectPrinter={connectPrinter} printerMode={printerMode} changePrinterMode={changePrinterMode} closeUnpaidBill={closeUnpaidBill} payOrderGroup={payOrderGroup} closeUnpaidBillGroup={closeUnpaidBillGroup}/>} 
      {page==='orders'&&<TableHistory orders={orders} update={updateStatus} pay={payTable} role={role} updateItem={updateItemStatus} deleteItem={deleteOrderItem}/>}
      {page==='menu'&&<Menu menu={menu} save={saveMenu} del={deleteMenu}/>}
      {page==='employees'&&<Employees data={employees} add={addEmployee} addAdvance={addAdvance} advances={advances} deleteAdvance={deleteAdvance}/>}
@@ -717,21 +857,28 @@ function POS({menu,table,setTable,chairs,setChairs,cart,addItem,qty,createOrder,
 function TableOpenHistory({orders,table,total:grand,closeTable,deleteItem,updateItem}){
  const [selected,setSelected]=useState([]);
  const available=orders.filter(o=>!['BILL_REQUESTED','PAID','CANCELLED'].includes(o.status));
- const toggle=id=>setSelected(x=>x.includes(id)?x.filter(v=>v!==id):[...x,id]);
+ const groupKey=o=>`${o.session_id||table}|${seatLabel(o)}`;
+ const groupIds=o=>available.filter(x=>groupKey(x)===groupKey(o)).map(x=>x.id);
+ const isFirstInGroup=o=>available.find(x=>groupKey(x)===groupKey(o))?.id===o.id;
+ const toggleGroup=o=>setSelected(current=>{
+   const ids=groupIds(o),all=ids.every(id=>current.includes(id));
+   return all?current.filter(id=>!ids.includes(id)):[...new Set([...current,...ids])];
+ });
  const selectedTotal=orders.filter(o=>selected.includes(o.id)).reduce((s,o)=>s+total(o),0);
+ const selectedGroups=new Set(orders.filter(o=>selected.includes(o.id)).map(groupKey)).size;
  useEffect(()=>{setSelected(x=>x.filter(id=>available.some(o=>o.id===id)))},[orders.length]);
  return <Panel t={`TABLE ${table} — OPEN HISTORY`}>
    {orders.length===0?<div className="empty">No previous orders for this table.</div>:orders.map((o,i)=><div className={`ticket ${selected.includes(o.id)?'selectedTicket':''}`} key={o.id}>
      <div className="ticketHead">
-       {available.some(x=>x.id===o.id)&&<label className="billCheck"><input type="checkbox" checked={selected.includes(o.id)} onChange={()=>toggle(o.id)}/><b>Send this order to bill</b></label>}
+       {available.some(x=>x.id===o.id)&&isFirstInGroup(o)&&<label className="billCheck"><input type="checkbox" checked={groupIds(o).every(id=>selected.includes(id))} onChange={()=>toggleGroup(o)}/><b>Bill {seatLabel(o)} — club all {groupIds(o).length} order{groupIds(o).length>1?'s':''}</b></label>}
        <b>Order #{i+1}</b><span>{seatLabel(o)}</span><span className={`status ${String(o.status).toLowerCase()}`}>{STATUS[o.status]}</span><small>{dt(o.created_at)}</small>
      </div>
      {(o.order_items||[]).map(it=><ItemRow key={it.id} item={it} canDelete={!['BILL_REQUESTED','PAID','CANCELLED'].includes(o.status)} onDelete={deleteItem}/>)}
      <div className="ticketTotal">{money(total(o))}</div>
    </div>)}
    <div className="grand"><span>TABLE TOTAL</span><b>{money(grand)}</b></div>
-   {available.length>0&&<button className="bill fullBtn" disabled={!selected.length} onClick={async()=>{await closeTable(table,selected);setSelected([])}}>🧾 SEND SELECTED TO BILL {selected.length?`— ${money(selectedTotal)}`:''}</button>}
-   {selected.length===0&&available.length>0&&<small className="hint">Tick only the chair/group order you want to bill. Other orders remain open.</small>}
+   {available.length>0&&<button className="bill fullBtn" disabled={!selected.length} onClick={async()=>{await closeTable(table,selected);setSelected([])}}>🧾 SEND {selectedGroups||''} BILL{selectedGroups===1?'':'S'} TO CASHIER {selected.length?`— ${money(selectedTotal)}`:''}</button>}
+   {selected.length===0&&available.length>0&&<small className="hint">Select the chair/group once. Every open order for that same chair selection will be clubbed into one bill.</small>}
  </Panel>
 }
 function Ready({orders,update,updateItem}){const x=orders.filter(o=>o.status==='READY'||(o.order_items||[]).some(i=>i.status==='READY'));return <><Title t="🔔 Ready to Serve" s="Green = served/ready, red = not yet served"/><div className="cards">{x.length===0&&<div className="empty panel">No ready items.</div>}{x.map(o=><div className="card" key={o.id}><div className="cardhead"><h2>TABLE {o.table_no}</h2><span>{seatLabel(o)}</span></div>{(o.order_items||[]).map(i=><ItemRow key={i.id} item={i} canServe={i.status==='READY'} onServe={updateItem}/>)}</div>)}</div></>}
@@ -795,15 +942,27 @@ function WifiPrinterSettings(){
  </div>
 }
 
-function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTakeawayItem,takeawayQty,createTakeaway,sendTakeawayToBilling,cancelTakeaway,printerName,connectPrinter,printerMode,changePrinterMode,closeUnpaidBill}){
+function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTakeawayItem,takeawayQty,createTakeaway,sendTakeawayToBilling,cancelTakeaway,printerName,connectPrinter,printerMode,changePrinterMode,closeUnpaidBill,payOrderGroup,closeUnpaidBillGroup}){
  const [openPay,setOpenPay]=useState(null),[expandedHistory,setExpandedHistory]=useState({});
+ const [directPayOrder,setDirectPayOrder]=useState(null),[directPayBusy,setDirectPayBusy]=useState(false);
  const [customerName,setCustomerName]=useState(''),[customerPhone,setCustomerPhone]=useState('');
  const [source,setSource]=useState('DIRECT'),[cat,setCat]=useState('All');
  const menuItems=menu||[];
- const dineBills=orders.filter(o=>orderType(o)==='DINE_IN'&&o.status==='BILL_REQUESTED').sort((a,b)=>Number(a.table_no)-Number(b.table_no)||new Date(a.created_at)-new Date(b.created_at));
+ const dineBillOrders=orders.filter(o=>orderType(o)==='DINE_IN'&&o.status==='BILL_REQUESTED');
+ const dineBills=Object.values(dineBillOrders.reduce((a,o)=>{
+   const k=isCounterDineIn(o)?`counter-${o.id}`:`${o.session_id||o.table_no}|${seatLabel(o)}`;
+   (a[k]??=[]).push(o);return a;
+ },{})).sort((a,b)=>Number(a[0].table_no||999)-Number(b[0].table_no||999)||new Date(a[0].created_at)-new Date(b[0].created_at));
  const takeawayBills=orders.filter(o=>orderType(o)==='TAKEAWAY'&&o.status==='BILL_REQUESTED');
  const takeawayOpen=orders.filter(o=>orderType(o)==='TAKEAWAY'&&!['PAID','CANCELLED','BILL_REQUESTED'].includes(o.status));
- const history=orders.filter(o=>o.status==='PAID').sort((a,b)=>new Date(b.paid_at||b.created_at)-new Date(a.paid_at||a.created_at));
+ const paidOrders=orders.filter(o=>o.status==='PAID');
+ const history=Object.values(paidOrders.reduce((a,o)=>{
+   const paidKey=o.paid_at||o.created_at||o.id;
+   const k=orderType(o)==='DINE_IN'&&!isCounterDineIn(o)
+     ? `${o.session_id||o.table_no}|${seatLabel(o)}|${paidKey}`
+     : `single-${o.id}`;
+   (a[k]??=[]).push(o);return a;
+ },{})).sort((a,b)=>new Date(b[0].paid_at||b[0].created_at)-new Date(a[0].paid_at||a[0].created_at));
  const cats=['All',...new Set(menuItems.map(x=>x.category||'Other'))];
  const list=menuItems.filter(x=>x.available!==false&&(cat==='All'||x.category===cat));
  const takeawayTotal=takeawayCart.reduce((s,x)=>s+Number(x.price)*x.qty,0);
@@ -824,6 +983,25 @@ function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTake
  };
 
  const payButtons=(key,fn,bill)=><>{openPay===key?<div className="paymentChooser"><div className="paymentTitle">Select payment method</div><div className="paymentButtons"><button className="success paymentBtn" onClick={async()=>{const ok=await fn('CASH');setOpenPay(null);if(ok){const stamped=Array.isArray(bill)?bill.map(o=>({...o,payment_method:'CASH',paid_at:new Date().toISOString()})):{...bill,payment_method:'CASH',paid_at:new Date().toISOString()};await printBill(stamped)}}}>💵 CASH + PRINT</button><button className="primary paymentBtn" onClick={async()=>{const ok=await fn('ONLINE');setOpenPay(null);if(ok){const stamped=Array.isArray(bill)?bill.map(o=>({...o,payment_method:'ONLINE',paid_at:new Date().toISOString()})):{...bill,payment_method:'ONLINE',paid_at:new Date().toISOString()};await printBill(stamped)}}}>📱 ONLINE + PRINT</button></div><button className="ghost compactBtn" onClick={()=>setOpenPay(null)}>Cancel</button></div>:<button className="success compactAction" onClick={()=>setOpenPay(key)}>✓ COLLECT PAYMENT</button>}</>;
+ const completeDirectDineIn=async paymentMethod=>{
+   if(!directPayOrder||directPayBusy)return;
+   setDirectPayBusy(true);
+   try{
+     const ok=await paySingle(directPayOrder.id,paymentMethod);
+     if(!ok)return;
+     const stamped={...directPayOrder,payment_method:paymentMethod,paid_at:new Date().toISOString(),status:'PAID'};
+     await printBill(stamped);
+     setDirectPayOrder(null);
+     setCustomerName('');
+     setCustomerPhone('');
+     setSource('DIRECT');
+     // Cart is also cleared inside createTakeawayOrder; keep this here as an explicit UI reset.
+     setTakeawayCart([]);
+   }finally{
+     setDirectPayBusy(false);
+   }
+ };
+
 
  return <div>
   <Title t="Billing & Takeaway" s="Dine-in bills and takeaway orders are handled by the cashier."/>
@@ -837,25 +1015,37 @@ function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTake
 
   <div className="billingSplit">
    <section><div className="sectionTitle"><h2>🍽️ DINE-IN BILLS</h2><span>{dineBills.length}</span></div>
-    {dineBills.length===0?<div className="empty panel">No active dine-in bills.</div>:<div className="cards dineBillCards">{dineBills.map(o=><div className="card individualBillCard" key={o.id}>
-      <div className="cardhead"><div><h2>TABLE {o.table_no}</h2><div className="billSeatLabel">{seatLabel(o)}</div></div><span className="orderTypeBadge">🍽️ DINE IN</span></div>
-      <div className="billOrderMeta"><span>Bill #{o.id.slice(0,6).toUpperCase()}</span><small>{dt(o.created_at)}</small></div>
-      {(o.order_items||[]).map(it=><div className="line" key={it.id}><span>{it.item_name} × {it.qty}</span><b>{money(it.line_total)}</b></div>)}
-      <div className="grand"><span>THIS BILL TOTAL</span><b>{money(total(o))}</b></div>
-      <div className="billActionRow"><button className="printBtn compactAction" onClick={()=>printBill(o)}>🖨️ PRINT THIS BILL</button>{payButtons(`dine-${o.id}`,m=>paySingle(o.id,m),o)}<button className="danger compactBtn" onClick={()=>closeUnpaidBill(o.id)}>✕ DELETE UNPAID BILL</button></div>
-    </div>)}</div>}
+    {dineBills.length===0?<div className="empty panel">No active dine-in bills.</div>:<div className="cards dineBillCards">{dineBills.map(g=>{const o=g[0],grand=g.reduce((s,x)=>s+total(x),0),ids=g.map(x=>x.id),counter=isCounterDineIn(o);return <div className="card individualBillCard" key={counter?o.id:`${o.session_id}-${seatLabel(o)}`}>
+      <div className="cardhead"><div><h2>{counter?'COUNTER DINE-IN':`TABLE ${o.table_no}`}</h2><div className="billSeatLabel">{counter?'DIRECT BILL':seatLabel(o)}</div></div><span className="orderTypeBadge">🍽️ DINE IN</span></div>
+      <div className="billOrderMeta"><span>{g.length} order{g.length>1?'s':''} clubbed</span><small>{dt(o.created_at)}</small></div>
+      {g.map((ord,idx)=><div className="clubbedOrder" key={ord.id}>{g.length>1&&<small className="clubbedOrderLabel">Order #{idx+1}</small>}{(ord.order_items||[]).map(it=><div className="line" key={it.id}><span>{it.item_name} × {it.qty}</span><b>{money(it.line_total)}</b></div>)}</div>)}
+      <div className="grand"><span>BILL TOTAL</span><b>{money(grand)}</b></div>
+      <div className="billActionRow"><button className="printBtn compactAction" onClick={()=>printBill(g)}>🖨️ PRINT THIS BILL</button>{payButtons(`dine-${ids.join('-')}`,m=>payOrderGroup(ids,m),g)}<button className="danger compactBtn" onClick={()=>closeUnpaidBillGroup(ids)}>✕ DELETE UNPAID BILL</button></div>
+    </div>})}</div>}
    </section>
 
-   <section><div className="sectionTitle"><h2>🥡 TAKEAWAY / PARCEL</h2><span>{takeawayOpen.length+takeawayBills.length}</span></div>
+   <section><div className="sectionTitle"><h2>🥡 TAKEAWAY / COUNTER</h2><span>{takeawayOpen.length+takeawayBills.length}</span></div>
     <div className="card takeawayCreator">
-     <div className="cardhead"><h3>New Takeaway Order</h3><span className={source==='ZOMATO'?'sourceBadge zomato':'sourceBadge'}>{source==='ZOMATO'?'ZOMATO ORDER':'DIRECT'}</span></div>
-     <div className="sourceSelector"><label><input type="radio" name="takeSource" checked={source==='DIRECT'} onChange={()=>setSource('DIRECT')}/> Direct</label><label><input type="radio" name="takeSource" checked={source==='ZOMATO'} onChange={()=>setSource('ZOMATO')}/> Zomato</label></div>
+     <div className="cardhead"><h3>{source==='DINE_IN'?'New Counter Dine-In Bill':'New Takeaway Order'}</h3><span className={source==='DINE_IN'?'sourceBadge dineInSource':'sourceBadge'}>{source==='DINE_IN'?'🍽️ DINE-IN':'🥡 TAKEAWAY'}</span></div>
+     <div className="sourceSelector"><label><input type="radio" name="takeSource" checked={source==='DIRECT'} onChange={()=>setSource('DIRECT')}/> Takeaway</label><label><input type="radio" name="takeSource" checked={source==='DINE_IN'} onChange={()=>setSource('DINE_IN')}/> Dine-In</label></div>
+     {source==='DINE_IN'&&<div className="counterDineInfo">Counter Dine-In goes directly to Billing and will not be sent to Kitchen.</div>}
      <div className="formGrid"><input placeholder="Customer name (optional)" value={customerName} onChange={e=>setCustomerName(e.target.value)}/><input placeholder="Phone (optional)" value={customerPhone} onChange={e=>setCustomerPhone(e.target.value)}/></div>
      <div className="chips">{cats.map(x=><button className={cat===x?'on':''} onClick={()=>setCat(x)} key={x}>{x}</button>)}</div>
      <div className="foods">{list.map(i=><button className="food" onClick={()=>addTakeawayItem(i)} key={i.id}><b>{i.name}</b><small>{i.category}</small><strong>{money(i.price)}</strong></button>)}</div>
      {takeawayCart.map(i=><div className="cart" key={i.id}><div><b>{i.name}</b><small>{money(i.price)} each</small></div><div className="counter"><button onClick={()=>takeawayQty(i.id,-1)}>−</button><b>{i.qty}</b><button onClick={()=>takeawayQty(i.id,1)}>+</button></div><strong>{money(i.price*i.qty)}</strong></div>)}
-     <div className="grand"><span>PARCEL TOTAL</span><b>{money(takeawayTotal)}</b></div>
-     <button className="kitchen compactAction" disabled={!takeawayCart.length} onClick={async()=>{await createTakeaway(customerName,customerPhone,source);setCustomerName('');setCustomerPhone('');setSource('DIRECT')}}>👨‍🍳 SEND TO KITCHEN</button>
+     <div className="grand"><span>{source==='DINE_IN'?'DINE-IN TOTAL':'PARCEL TOTAL'}</span><b>{money(takeawayTotal)}</b></div>
+     <button className={source==='DINE_IN'?'bill compactAction':'kitchen compactAction'} disabled={!takeawayCart.length} onClick={async()=>{
+       const selectedSource=source;
+       const created=await createTakeaway(customerName,customerPhone,selectedSource);
+       if(!created)return;
+       if(selectedSource==='DINE_IN'){
+         setDirectPayOrder(created);
+       }else{
+         setCustomerName('');
+         setCustomerPhone('');
+         setSource('DIRECT');
+       }
+     }}>{source==='DINE_IN'?'🧾 CREATE DIRECT BILL':'👨‍🍳 SEND TO KITCHEN'}</button>
     </div>
 
     {takeawayOpen.length>0&&<Panel t="Takeaway Orders in Kitchen"><div className="cards">{takeawayOpen.map(o=><div className="ticket relativeTicket" key={o.id}>
@@ -875,11 +1065,30 @@ function Billing({orders,menu,pay,paySingle,takeawayCart,setTakeawayCart,addTake
    </section>
   </div>
 
+
+  {directPayOrder&&<div className="modalBackdrop directPaymentBackdrop" onClick={()=>!directPayBusy&&setDirectPayOrder(null)}>
+    <div className="modalCard directPaymentModal" onClick={e=>e.stopPropagation()}>
+      <div className="modalHead">
+        <div><h2>Collect Payment</h2><small>Counter Dine-In · Bill #{String(directPayOrder.id).slice(0,6).toUpperCase()}</small></div>
+        <button className="modalClose" disabled={directPayBusy} onClick={()=>setDirectPayOrder(null)}>×</button>
+      </div>
+      <div className="directBillItems">
+        {(directPayOrder.order_items||[]).map(it=><div className="line" key={it.id||`${it.item_name}-${it.qty}`}><span>{it.item_name} × {it.qty}</span><b>{money(it.line_total)}</b></div>)}
+      </div>
+      <div className="grand"><span>TOTAL</span><b>{money(total(directPayOrder))}</b></div>
+      <div className="directPaymentActions">
+        <button className="success paymentBtn" disabled={directPayBusy} onClick={()=>completeDirectDineIn('CASH')}>💵 CASH + PRINT</button>
+        <button className="primary paymentBtn" disabled={directPayBusy} onClick={()=>completeDirectDineIn('ONLINE')}>📱 ONLINE + PRINT</button>
+      </div>
+      <small className="hint">Payment is saved first, then the receipt is printed. This order is not sent to Kitchen.</small>
+    </div>
+  </div>}
+
   <div className="sectionTitle" style={{marginTop:24}}><div><h2>Billing History</h2><p className="muted">Expand a paid bill to see every item, order source and payment mode.</p></div></div>
   <Panel>{history.length===0?<div className="empty">No paid bills yet.</div>:<div className="tablewrap"><table><thead><tr><th>Date & Time</th><th>Type</th><th>Source</th><th>Table / Parcel</th><th>Amount</th><th>Payment</th><th>Status</th></tr></thead><tbody>
-   {history.map(o=><React.Fragment key={o.id}><tr className="historyRow" onClick={()=>setExpandedHistory(x=>({...x,[o.id]:!x[o.id]}))}>
-    <td>{expandedHistory[o.id]?'▼':'▶'} {fmtDateTime(o.paid_at||o.created_at)}</td><td>{orderTypeLabel(o)}</td><td>{orderType(o)==='TAKEAWAY'?sourceBadge(o):'—'}</td><td>{orderType(o)==='TAKEAWAY'?`Parcel #${o.id.slice(0,6).toUpperCase()}`:`Table ${o.table_no} • ${seatLabel(o)}`}</td><td><b>{money(total(o))}</b></td><td><span className="status">{paymentBadge(o.payment_method)}</span></td><td><span className="badge green">PAID</span></td>
-   </tr>{expandedHistory[o.id]&&<tr className="historyDetails"><td colSpan="7"><div className="historyItems"><div className="historyItemsTitle">Bill Items</div>{(o.order_items||[]).map(it=><div className="historyItem" key={it.id}><span>{it.item_name} × {it.qty}</span><span>{money(it.line_total)}</span></div>)}<div className="historyTotal"><span>Total</span><b>{money(total(o))}</b></div><div className="historyMeta"><span>Order: <b>{orderTypeLabel(o)}</b></span>{orderType(o)==='TAKEAWAY'&&<span>Source: <b>{sourceBadge(o)}</b></span>}{orderType(o)==='TAKEAWAY'&&o.token_number!=null&&<span>Token: <b>#{o.token_number}</b></span>}<span>Payment: <b>{paymentBadge(o.payment_method)}</b></span><span>Paid: {fmtDateTime(o.paid_at||o.created_at)}</span><button className="printBtn small" onClick={e=>{e.stopPropagation();printBill(o)}}>🖨️ REPRINT</button></div></div></td></tr>}</React.Fragment>)}
+   {history.map(g=>{const o=g[0],key=g.map(x=>x.id).join('-'),grand=g.reduce((s,x)=>s+total(x),0);return <React.Fragment key={key}><tr className="historyRow" onClick={()=>setExpandedHistory(x=>({...x,[key]:!x[key]}))}>
+    <td>{expandedHistory[key]?'▼':'▶'} {fmtDateTime(o.paid_at||o.created_at)}</td><td>{orderTypeLabel(o)}</td><td>{isCounterDineIn(o)?'COUNTER':orderType(o)==='TAKEAWAY'?sourceBadge(o):'—'}</td><td>{isCounterDineIn(o)?'Counter Dine-In':orderType(o)==='TAKEAWAY'?`Parcel #${o.id.slice(0,6).toUpperCase()}`:`Table ${o.table_no} • ${seatLabel(o)}`}</td><td><b>{money(grand)}</b></td><td><span className="status">{paymentBadge(o.payment_method)}</span></td><td><span className="badge green">PAID</span></td>
+   </tr>{expandedHistory[key]&&<tr className="historyDetails"><td colSpan="7"><div className="historyItems"><div className="historyItemsTitle">Bill Items {g.length>1&&<small>· {g.length} orders clubbed</small>}</div>{g.flatMap(x=>x.order_items||[]).map(it=><div className="historyItem" key={it.id}><span>{it.item_name} × {it.qty}</span><span>{money(it.line_total)}</span></div>)}<div className="historyTotal"><span>Total</span><b>{money(grand)}</b></div><div className="historyMeta"><span>Order: <b>{isCounterDineIn(o)?'COUNTER DINE-IN':orderTypeLabel(o)}</b></span>{orderType(o)==='TAKEAWAY'&&<span>Source: <b>{sourceBadge(o)}</b></span>}{orderType(o)==='TAKEAWAY'&&o.token_number!=null&&<span>Token: <b>#{o.token_number}</b></span>}<span>Payment: <b>{paymentBadge(o.payment_method)}</b></span><span>Paid: {fmtDateTime(o.paid_at||o.created_at)}</span><button className="printBtn small" onClick={e=>{e.stopPropagation();printBill(g)}}>🖨️ REPRINT</button></div></div></td></tr>}</React.Fragment>})}
   </tbody></table></div>}</Panel>
  </div>
 }
@@ -895,9 +1104,7 @@ function TableHistory({orders,pay,role,updateItem,deleteItem}){
   {g.map((o,i)=><div className="ticket" key={o.id}><div className="ticketHead"><b>Order #{i+1}</b><span>{seatLabel(o)}</span><small>{dt(o.created_at)}</small></div>{(o.order_items||[]).map(it=><ItemRow key={it.id} item={it} canServe={role==='waiter'&&it.status==='READY'} onServe={updateItem} canDelete={role==='waiter'&&!['BILL_REQUESTED','PAID','CANCELLED'].includes(o.status)} onDelete={deleteItem}/>)}</div>)}
   <div className="grand"><span>OPEN TABLE TOTAL</span><b>{money(grand)}</b></div>
   {role==='waiter'&&<small className="hint">Add another ticket anytime. Close the table only when the customer is done.</small>}
-  {role==='cashier'&&g.every(o=>o.status==='BILL_REQUESTED')&&(openPay===sid?
-    <div className="paymentChooser"><div className="paymentTitle">Select payment method</div><div className="paymentButtons"><button className="success paymentBtn" onClick={()=>{pay(sid,'CASH');setOpenPay(null)}}>💵 CASH</button><button className="primary paymentBtn" onClick={()=>{pay(sid,'ONLINE');setOpenPay(null)}}>📱 ONLINE PAYMENT</button></div><button className="ghost full" onClick={()=>setOpenPay(null)}>Cancel</button></div>
-    :<button className="success full" onClick={()=>setOpenPay(sid)}>COLLECT {money(grand)}</button>)}
+  {role==='cashier'&&<small className="hint">Use the Bills tab to collect payment. Bills are grouped by Entire Table or the selected chair group.</small>}
  </div>})}</div></>
 }
 

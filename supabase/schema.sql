@@ -213,7 +213,7 @@ create policy "Authenticated staff can manage salary payments" on public.salary_
 -- v17 order source
 alter table public.orders add column if not exists order_source text not null default 'DIRECT';
 alter table public.orders drop constraint if exists orders_order_source_check;
-alter table public.orders add constraint orders_order_source_check check (order_source in ('DIRECT','ZOMATO'));
+alter table public.orders add constraint orders_order_source_check check (order_source in ('DIRECT','DINE_IN','ZOMATO'));
 
 
 -- v18.1 daily takeaway tokens
@@ -240,7 +240,7 @@ declare
   local_date date;
   next_token integer;
 begin
-  if new.order_type = 'TAKEAWAY' and new.token_number is null then
+  if new.order_type = 'TAKEAWAY' and coalesce(new.order_source, 'DIRECT') <> 'DINE_IN' and new.token_number is null then
     local_date := (now() at time zone 'Asia/Kolkata')::date;
 
     insert into public.daily_takeaway_tokens(token_date, last_token)
@@ -262,10 +262,6 @@ create trigger trg_assign_takeaway_token
 before insert on public.orders
 for each row
 execute function public.assign_takeaway_token();
-
-create index if not exists orders_takeaway_token_idx
-  on public.orders ((created_at at time zone 'Asia/Kolkata')::date, token_number)
-  where order_type = 'TAKEAWAY';
 
 -- Optional cleanup: old counter rows can be retained safely.
 -- They are tiny and make historical auditing easier.

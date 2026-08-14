@@ -186,7 +186,8 @@ const perms=[
   '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />',
   '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
   '<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
-  '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />'
+  '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />',
+  '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />'
 ];
 for(const p of perms){
   if(!xml.includes(p)) xml=xml.replace('<application',p+'\\n    <application');

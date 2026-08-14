@@ -1,7 +1,7 @@
 {
   "name": "brottta-restaurant-pos",
   "private": true,
-  "version": "18.3.0",
+  "version": "18.5.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,7 +17,9 @@
     "react-dom": "latest",
     "xlsx": "^0.18.5",
     "@capacitor/core": "8.4.2",
-    "@capacitor/android": "8.4.2"
+    "@capacitor/android": "8.4.2",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/local-notifications": "^8.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "latest",
