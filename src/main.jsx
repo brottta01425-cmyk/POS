@@ -275,7 +275,7 @@ async function showAndroidNotification(title,body,id=Date.now()%2147483647){
 
 function App(){
  const[session,setSession]=useState(null),[profile,setProfile]=useState(null),[loading,setLoading]=useState(true),[page,setPage]=useState('dashboard'),[msg,setMsg]=useState('');
- const[orders,setOrders]=useState([]),[menu,setMenu]=useState([]),[employees,setEmployees]=useState([]),[attendance,setAttendance]=useState([]),[expenses,setExpenses]=useState([]),[salaryPayments,setSalaryPayments]=useState([]),[advances,setAdvances]=useState([]);
+ const[orders,setOrders]=useState([]),[menu,setMenu]=useState([]),[employees,setEmployees]=useState([]),[attendance,setAttendance]=useState([]),[expenses,setExpenses]=useState([]),[salesAdjustments,setSalesAdjustments]=useState([]),[salaryPayments,setSalaryPayments]=useState([]),[advances,setAdvances]=useState([]);
  const[table,setTable]=useState(null),[chairs,setChairs]=useState([]),[cart,setCart]=useState([]),[takeawayCart,setTakeawayCart]=useState([]),[loginRole,setLoginRole]=useState('waiter'),[tableResetNotice,setTableResetNotice]=useState('');
  const previousOrderIds=React.useRef(null),previousItemStates=React.useRef(null),previousOrderStatuses=React.useRef(null),liveReady=React.useRef(false);
  const appIsActive=React.useRef(true);
@@ -460,7 +460,7 @@ function App(){
    const saved=localStorage.getItem(`brottta-last-page-${data.role}`);
    setPage(saved&&allowed.includes(saved)?saved:fallback)
  }
- async function loadAll(){await Promise.all([loadOrders(),loadMenu(),loadEmployees(),loadAttendance(),loadExpenses(),loadSalaryPayments(),loadAdvances()])}
+ async function loadAll(){await Promise.all([loadOrders(),loadMenu(),loadEmployees(),loadAttendance(),loadExpenses(),loadSalesAdjustments(),loadSalaryPayments(),loadAdvances()])}
  async function loadOrders(){
    const{data,error}=await supabase.from('orders').select('*,order_items(*)').order('created_at',{ascending:false});
    if(error)setMsg(error.message);else setOrders(data||[])
@@ -471,6 +471,7 @@ function App(){
  async function loadSalaryPayments(){const{data,error}=await supabase.from('salary_payments').select('*').order('period_end',{ascending:false});if(error&&error.code!=='42P01')setMsg(error.message);else setSalaryPayments(data||[])}
  async function loadAdvances(){const{data,error}=await supabase.from('employee_advances').select('*').order('created_at',{ascending:false});if(error&&error.code!=='42P01')setMsg(error.message);else setAdvances(data||[])}
  async function loadExpenses(){const{data,error}=await supabase.from('expenses').select('*').order('expense_date',{ascending:false});if(error)setMsg(error.message);else setExpenses(data||[])}
+ async function loadSalesAdjustments(){const{data,error}=await supabase.from('sales_adjustments').select('*').order('adjustment_date',{ascending:false});if(error&&error.code!=='42P01')setMsg(error.message);else setSalesAdjustments(data||[])}
  async function login(email,password,wanted){
    const{data,error}=await supabase.auth.signInWithPassword({email,password});
    if(error){setMsg(error.message);return}
@@ -729,7 +730,44 @@ function App(){
    const{error}=await supabase.from('employees').insert({name,role:r,active:true,payment_type,per_day_salary,advance_balance:0});
    if(error)setMsg(error.message);else loadEmployees()
  }
- async function markAttendance(e,s,dateValue){const d=dateValue||today();const{error}=await supabase.from('attendance').upsert({employee_id:e.id,attendance_date:d,status:s},{onConflict:'employee_id,attendance_date'});if(error)setMsg(error.message);else loadAttendance()}
+ async function markAttendance(e,s,dateValue){
+   const d=dateValue||today();
+   const{error}=await supabase.from('attendance').upsert({employee_id:e.id,attendance_date:d,status:s},{onConflict:'employee_id,attendance_date'});
+   if(error)setMsg(error.message);else loadAttendance();
+ }
+ async function submitAttendanceDay(dateValue){
+   const d=dateValue||today();
+   const activeEmployees=employees.filter(e=>e.active!==false);
+   if(!activeEmployees.length){setMsg('No active employees found.');return false}
+   const{data:dayRows,error}=await supabase.from('attendance').select('*').eq('attendance_date',d);
+   if(error){setMsg(error.message);return false}
+   const rows=dayRows||[];
+   const missing=activeEmployees.filter(e=>!rows.some(r=>r.employee_id===e.id));
+   if(missing.length){
+     setMsg(`Mark attendance for all employees before submitting. Missing: ${missing.map(e=>e.name).join(', ')}`);
+     return false;
+   }
+   let salaryTotal=0,presentCount=0,halfCount=0;
+   activeEmployees.forEach(e=>{
+     const row=rows.find(r=>r.employee_id===e.id);
+     const rate=Number(e.per_day_salary||0);
+     if(row?.status==='PRESENT'){salaryTotal+=rate;presentCount++}
+     else if(row?.status==='HALF_DAY'){salaryTotal+=rate*0.5;halfCount++}
+   });
+   const description=`Daily Staff Salary — ${presentCount} Present${halfCount?`, ${halfCount} Half Day`:''}`;
+   const payload={
+     description,
+     amount:Number(salaryTotal.toFixed(2)),
+     expense_date:d,
+     expense_type:'SALARY',
+     auto_key:`ATTENDANCE_SALARY:${d}`
+   };
+   const{error:e}=await supabase.from('expenses').upsert(payload,{onConflict:'auto_key'});
+   if(e){setMsg(e.message);return false}
+   await Promise.all([loadAttendance(),loadExpenses()]);
+   setMsg(`Attendance submitted. ${money(salaryTotal)} added to ${fmtDate(d)} expenses as staff salary.`);
+   return true;
+ }
  async function updateEmployeePay(e,patch){const{error}=await supabase.from('employees').update(patch).eq('id',e.id);if(error)setMsg(error.message);else{await loadEmployees();setMsg('Employee payment settings updated.')}}
  async function addAdvance(e,amount,note=''){
    amount=Number(amount||0);if(amount<=0)return setMsg('Enter a valid lending amount.');
@@ -770,7 +808,27 @@ function App(){
    setMsg(`${e.name}: ${e.payment_type==='MONTHLY'?'Monthly':'Weekly'} salary ${money(net)} marked as paid.`);
  }
 
- async function addExpense(){const description=prompt('Expense description');if(!description)return;const amount=Number(prompt('Amount'));if(!amount)return;const{error}=await supabase.from('expenses').insert({description,amount});if(error)setMsg(error.message);else loadExpenses()}
+ async function addExpense(dateValue=today()){
+   const description=prompt('Expense description');if(!description)return;
+   const amount=Number(prompt('Amount'));if(!Number.isFinite(amount)||amount<=0)return setMsg('Enter a valid expense amount.');
+   const{error}=await supabase.from('expenses').insert({description,amount,expense_date:dateValue,expense_type:'MANUAL'});
+   if(error)setMsg(error.message);else{await loadExpenses();setMsg(`${money(amount)} expense added for ${fmtDate(dateValue)}.`)}
+ }
+ async function saveSalesAdjustment(dateValue,amount,note=''){
+   const d=dateValue||today(),value=Number(amount||0);
+   if(!Number.isFinite(value))return setMsg('Enter a valid adjustment amount.');
+   const{error}=await supabase.from('sales_adjustments').upsert({
+     adjustment_date:d,
+     amount:value,
+     note:note||null,
+     created_by:session?.user?.id||null,
+     updated_at:new Date().toISOString()
+   },{onConflict:'adjustment_date'});
+   if(error){setMsg(error.message);return false}
+   await loadSalesAdjustments();
+   setMsg(`Sales adjustment ${money(value)} saved for ${fmtDate(d)}.`);
+   return true;
+ }
 
  if(loading)return <div className="splash">Loading Brottta POS...</div>;
  if(!session||!profile)return <Login role={loginRole} setRole={setLoginRole} login={login} msg={msg}/>;
@@ -778,7 +836,7 @@ function App(){
    <header><div className="brandWrap"><img src="/brottta-logo.jpg" className="brandLogo"/><div className="poweredBy">Powered by <b>highloops</b></div></div><div>{(role==='chef'||role==='waiter')&&<button className={soundEnabled?'soundBtn enabled':'soundBtn'} onClick={enableSound}>{soundEnabled?'🔔 Sound On':'🔕 Enable Sound'}</button>}<button className={printerName?'printerBtn connected':'printerBtn'} onClick={connectPrinter}>{printerName?'🖨️ '+printerName:'🔵 Connect Printer'}</button><button className="themeBtn" onClick={()=>setDark(x=>!x)}>{dark?'☀️ Light':'🌙 Dark'}</button><span className="pill">{ROLES[role]}</span> {profile.full_name||session.user.email} <button className="ghost" onClick={()=>supabase.auth.signOut()}>Logout</button></div></header>
    <div className="layout"><aside>{nav.map(([id,n])=><button key={id} className={page===id?'active':''} onClick={()=>setPage(id)}>{n}</button>)}</aside>
    <main>{msg&&<div className="toast">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
-     {page==='dashboard'&&<Dashboard orders={orders} menu={menu} employees={employees}/>}
+     {page==='dashboard'&&<Dashboard orders={orders} menu={menu} employees={employees} expenses={expenses} adjustments={salesAdjustments} saveAdjustment={saveSalesAdjustment}/>} 
      {page==='pos'&&<POS menu={menu} table={table} setTable={setTable} chairs={chairs} setChairs={setChairs} cart={cart} addItem={addItem} qty={qty} createOrder={createOrder} orders={orders} closeTable={closeTable} resetNotice={tableResetNotice} deleteItem={deleteOrderItem} updateItem={updateItemStatus}/>}
      {page==='ready'&&<Ready orders={orders} update={updateStatus} updateItem={updateItemStatus}/>}
      {page==='kitchen'&&<Kitchen orders={orders} update={updateStatus} updateItem={updateItemStatus}/>}
@@ -787,9 +845,9 @@ function App(){
      {page==='menu'&&<Menu menu={menu} save={saveMenu} del={deleteMenu}/>}
      {page==='employees'&&<Employees data={employees} add={addEmployee} addAdvance={addAdvance} advances={advances} deleteAdvance={deleteAdvance}/>}
      {page==='payroll'&&role==='super_admin'&&<Payroll data={employees} add={addEmployee} update={updateEmployeePay} addAdvance={addAdvance} advances={advances} payments={salaryPayments} attendance={attendance} paySalary={paySalary} deleteAdvance={deleteAdvance}/>} 
-     {page==='attendance'&&<Attendance data={employees} records={attendance} mark={markAttendance}/>}
+     {page==='attendance'&&<Attendance data={employees} records={attendance} expenses={expenses} mark={markAttendance} submitDay={submitAttendanceDay}/>} 
      {page==='expenses'&&<Expenses data={expenses} add={addExpense}/>}
-     {page==='analytics'&&<Analytics orders={orders} expenses={expenses}/>}
+     {page==='analytics'&&<Analytics orders={orders} expenses={expenses} adjustments={salesAdjustments}/>} 
    </main></div></div>
 }
 
@@ -806,19 +864,83 @@ function rangeFilterOrders(orders,from,to){
 function DateRange({from,to,setFrom,setTo}){
  return <div className="filterRow dateRange"><label>From<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>To<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label><button className="small" onClick={()=>{setFrom(today());setTo(today())}}>Today</button><button className="small" onClick={()=>{setFrom('');setTo('')}}>Clear</button></div>
 }
-function Dashboard({orders,menu,employees}){
+function Dashboard({orders,menu,employees,expenses,adjustments,saveAdjustment}){
  const [from,setFrom]=useState(today()),[to,setTo]=useState(today());
+ const [adjustmentInput,setAdjustmentInput]=useState('0'),[adjustmentNote,setAdjustmentNote]=useState('');
  const paid=rangeFilterOrders(orders.filter(o=>o.status==='PAID'),from,to);
  const dine=paid.filter(o=>orderType(o)==='DINE_IN'),take=paid.filter(o=>orderType(o)==='TAKEAWAY');
- const sales=paid.reduce((s,o)=>s+total(o),0),cash=paid.filter(o=>o.payment_method==='CASH').reduce((s,o)=>s+total(o),0),online=paid.filter(o=>o.payment_method==='ONLINE').reduce((s,o)=>s+total(o),0);
+ const sales=paid.reduce((s,o)=>s+total(o),0);
+ const cash=paid.filter(o=>o.payment_method==='CASH').reduce((s,o)=>s+total(o),0);
+ const online=paid.filter(o=>o.payment_method==='ONLINE').reduce((s,o)=>s+total(o),0);
+ const rangeExpenses=(expenses||[]).filter(e=>(!from||e.expense_date>=from)&&(!to||e.expense_date<=to));
+ const totalExpenses=rangeExpenses.reduce((s,e)=>s+Number(e.amount||0),0);
+ const rangeAdjustments=(adjustments||[]).filter(a=>(!from||a.adjustment_date>=from)&&(!to||a.adjustment_date<=to));
+ const adjustmentAmount=rangeAdjustments.reduce((s,a)=>s+Number(a.amount||0),0);
+ const adjustedSales=sales+adjustmentAmount;
+ const profit=adjustedSales-totalExpenses;
+ const singleDay=from&&to&&from===to;
+ const selectedAdjustment=singleDay?(adjustments||[]).find(a=>a.adjustment_date===from):null;
+
+ useEffect(()=>{
+   if(singleDay){
+     setAdjustmentInput(String(Number(selectedAdjustment?.amount||0)));
+     setAdjustmentNote(selectedAdjustment?.note||'');
+   }
+ },[from,to,selectedAdjustment?.amount,selectedAdjustment?.note]);
+
  const top={};paid.forEach(o=>(o.order_items||[]).forEach(i=>{top[i.item_name]=(top[i.item_name]||0)+Number(i.qty||0)}));
- return <><div className="dashboardBrand"><img src="/brottta-logo.jpg"/><div><h2>BROTTTA</h2><span>Specialised in Parotta</span></div></div><Title t="Dashboard" s="Select a date or date range to track restaurant performance"/><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}/>
-  <div className="stats"><Stat n="Total Sales" v={money(sales)}/><Stat n="Total Orders" v={paid.length}/><Stat n="Cash" v={money(cash)}/><Stat n="Online" v={money(online)}/></div>
+
+ const daily=[];
+ if(from&&to&&from<=to){
+   const cur=new Date(`${from}T12:00:00`),end=new Date(`${to}T12:00:00`);
+   let guard=0;
+   while(cur<=end&&guard<370){
+     const d=dateKey(cur);
+     const dayOrders=orders.filter(o=>o.status==='PAID'&&(o.paid_at||o.created_at||'').slice(0,10)===d);
+     const raw=dayOrders.reduce((s,o)=>s+total(o),0);
+     const adj=(adjustments||[]).filter(a=>a.adjustment_date===d).reduce((s,a)=>s+Number(a.amount||0),0);
+     const exp=(expenses||[]).filter(e=>e.expense_date===d).reduce((s,e)=>s+Number(e.amount||0),0);
+     daily.push({date:d,sales:raw,adjustment:adj,adjusted:raw+adj,expenses:exp,profit:raw+adj-exp});
+     cur.setDate(cur.getDate()+1);guard++;
+   }
+ }
+
+ return <><div className="dashboardBrand"><img src="/brottta-logo.jpg"/><div><h2>BROTTTA</h2><span>Specialised in Parotta</span></div></div>
+  <Title t="Dashboard" s="Sales, adjustments, expenses and daily profit"/>
+  <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}/>
+
+  <div className="stats financeStats">
+   <Stat n="Total Sales" v={money(sales)}/>
+   <Stat n="Adjustment" v={`${adjustmentAmount>0?'+':''}${money(adjustmentAmount)}`}/>
+   <Stat n="Adjusted Sales" v={money(adjustedSales)}/>
+   <Stat n="Total Expenses" v={money(totalExpenses)}/>
+   <Stat n="Profit / Day Total" v={money(profit)}/>
+  </div>
+  <div className="stats"><Stat n="Total Orders" v={paid.length}/><Stat n="Cash" v={money(cash)}/><Stat n="Online" v={money(online)}/></div>
+
+  <Panel t="Sales Adjustment">
+   {singleDay?<div className="salesAdjustmentBox">
+     <div className="adjustmentExplanation"><b>Raw Total Sales: {money(sales)}</b><small>Adjustment can be positive or negative. Profit always uses Adjusted Sales.</small></div>
+     <label>Adjustment Amount (+ / −)<input type="number" step="0.01" value={adjustmentInput} onChange={e=>setAdjustmentInput(e.target.value)} placeholder="Example: 500 or -250"/></label>
+     <label>Reason / Note<input value={adjustmentNote} onChange={e=>setAdjustmentNote(e.target.value)} placeholder="Example: Cash correction / missed sale"/></label>
+     <button className="primary compactBtn" onClick={()=>saveAdjustment(from,Number(adjustmentInput||0),adjustmentNote)}>Save Adjustment</button>
+     <div className="adjustmentResult"><span>Adjusted Sales</span><b>{money(sales+Number(adjustmentInput||0))}</b></div>
+   </div>:<div className="empty">Select a single date to add or edit that day's sales adjustment. The range total above includes all saved adjustments.</div>}
+  </Panel>
+
   <div className="splitStats">
    <div className="statGroup dine"><h2>🍽️ Dine-In</h2><div className="stats"><Stat n="Sales" v={money(dine.reduce((s,o)=>s+total(o),0))}/><Stat n="Orders" v={dine.length}/></div></div>
    <div className="statGroup takeaway"><h2>🥡 Takeaway / Parcel</h2><div className="stats"><Stat n="Sales" v={money(take.reduce((s,o)=>s+total(o),0))}/><Stat n="Orders" v={take.length}/></div></div>
   </div>
-  <Panel t="Top Selling Items">{Object.entries(top).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n,q],i)=><div className="rank" key={n}><span>#{i+1}</span><b>{n}</b><strong>{q} sold</strong></div>)}</Panel></>
+
+  <Panel t="Daily Sales → Expense → Profit">
+   <div className="tablewrap"><table><thead><tr><th>Date</th><th>Total Sales</th><th>Adjustment</th><th>Adjusted Sales</th><th>Expenses</th><th>Profit</th></tr></thead><tbody>
+    {daily.map(x=><tr key={x.date}><td>{fmtDate(x.date)}</td><td>{money(x.sales)}</td><td className={x.adjustment<0?'negativeAmount':x.adjustment>0?'positiveAmount':''}>{x.adjustment>0?'+':''}{money(x.adjustment)}</td><td><b>{money(x.adjusted)}</b></td><td>{money(x.expenses)}</td><td><b className={x.profit<0?'negativeAmount':'positiveAmount'}>{money(x.profit)}</b></td></tr>)}
+   </tbody></table></div>
+  </Panel>
+
+  <Panel t="Top Selling Items">{Object.entries(top).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n,q],i)=><div className="rank" key={n}><span>#{i+1}</span><b>{n}</b><strong>{q} sold</strong></div>)}</Panel>
+ </>;
 }
 
 function seatLabel(o){return o.seat_label||'ENTIRE TABLE'}
@@ -1174,25 +1296,61 @@ function Payroll({data,add,update,addAdvance,advances,payments,attendance,paySal
  </>;
 }
 
-function Attendance({data,records,mark}){
+function Attendance({data,records,expenses,mark,submitDay}){
  const [date,setDate]=useState(today());
  const rows=records.filter(r=>r.attendance_date===date);
- return <><Title t="Attendance" s="Select a date and mark each employee's attendance"/>
+ const active=data.filter(x=>x.active!==false);
+ const missing=active.filter(e=>!rows.some(r=>r.employee_id===e.id));
+ const salaryPreview=active.reduce((sum,e)=>{
+   const day=rows.find(x=>x.employee_id===e.id),rate=Number(e.per_day_salary||0);
+   return sum+(day?.status==='PRESENT'?rate:day?.status==='HALF_DAY'?rate*0.5:0);
+ },0);
+ const salaryExpense=(expenses||[]).find(e=>e.auto_key===`ATTENDANCE_SALARY:${date}`);
+ return <><Title t="Attendance" s="Mark everyone, then submit once to add the day's staff salary to Expenses"/>
   <div className="singleDatePicker"><label>Date<input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><button className="small" onClick={()=>setDate(today())}>Today</button></div>
-  <Panel t={`Attendance — ${fmtDate(date)}`}><div className="attendanceGrid">{data.filter(x=>x.active!==false).map(e=>{const day=rows.find(x=>x.employee_id===e.id);return <div className="card employeeAttend" key={e.id}><div><b>{e.name}</b> <span className="roleSpace">{e.role}</span></div><small>Status: {day?.status||'Not marked'}</small><div className="actions compactActions"><button className={day?.status==='PRESENT'?'success':'small'} onClick={()=>mark(e,'PRESENT',date)}>Present</button><button className={day?.status==='HALF_DAY'?'primary':'small'} onClick={()=>mark(e,'HALF_DAY',date)}>Half Day</button><button className={day?.status==='ABSENT'?'danger':'small'} onClick={()=>mark(e,'ABSENT',date)}>Absent</button><button className={day?.status==='LEAVE'?'primary':'small'} onClick={()=>mark(e,'LEAVE',date)}>Leave</button></div></div>})}</div></Panel>
+  <Panel t={`Attendance — ${fmtDate(date)}`}>
+   <div className="attendanceSubmitSummary">
+    <div><span>Marked</span><b>{active.length-missing.length}/{active.length}</b></div>
+    <div><span>Salary Preview</span><b>{money(salaryPreview)}</b></div>
+    <div><span>Status</span><b className={salaryExpense?'positiveAmount':''}>{salaryExpense?'✓ Submitted':'Not Submitted'}</b></div>
+   </div>
+   <div className="attendanceGrid">{active.map(e=>{const day=rows.find(x=>x.employee_id===e.id);return <div className="card employeeAttend" key={e.id}><div><b>{e.name}</b> <span className="roleSpace">{e.role}</span></div><small>Per Day: {money(e.per_day_salary||0)} · Status: {day?.status||'Not marked'}</small><div className="actions compactActions"><button className={day?.status==='PRESENT'?'success':'small'} onClick={()=>mark(e,'PRESENT',date)}>Present</button><button className={day?.status==='HALF_DAY'?'primary':'small'} onClick={()=>mark(e,'HALF_DAY',date)}>Half Day</button><button className={day?.status==='ABSENT'?'danger':'small'} onClick={()=>mark(e,'ABSENT',date)}>Absent</button><button className={day?.status==='LEAVE'?'primary':'small'} onClick={()=>mark(e,'LEAVE',date)}>Leave</button></div></div>})}</div>
+   <div className="attendanceSubmitBar">
+    {missing.length>0?<small>Mark attendance for: {missing.map(e=>e.name).join(', ')}</small>:<small>All employees marked. Present = full per-day salary; Half Day = 50%.</small>}
+    <button className="primary compactAction" disabled={missing.length>0} onClick={()=>submitDay(date)}>{salaryExpense?'↻ UPDATE SUBMITTED ATTENDANCE':'✓ SUBMIT ATTENDANCE & ADD SALARY EXPENSE'}</button>
+   </div>
+  </Panel>
  </>;
 }
 
-function Expenses({data,add}){return <><Title t="Expenses" s="Track costs"><button className="primary" onClick={add}>+ Add Expense</button></Title><Panel><TableSimple heads={['Date','Description','Amount']} rows={data.map(x=>[x.expense_date,x.description,money(x.amount)])}/></Panel></>}
+function Expenses({data,add}){
+ const [date,setDate]=useState(today());
+ const dayRows=data.filter(x=>x.expense_date===date);
+ const dayTotal=dayRows.reduce((s,x)=>s+Number(x.amount||0),0);
+ const salary=dayRows.filter(x=>x.expense_type==='SALARY'||String(x.auto_key||'').startsWith('ATTENDANCE_SALARY:')).reduce((s,x)=>s+Number(x.amount||0),0);
+ const other=dayTotal-salary;
+ return <><Title t="Expenses" s="Daily salary expense is added automatically when attendance is submitted"><button className="primary compactBtn" onClick={()=>add(date)}>+ Add Expense</button></Title>
+  <div className="singleDatePicker"><label>Date<input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><button className="small" onClick={()=>setDate(today())}>Today</button></div>
+  <div className="stats"><Stat n="Staff Salary" v={money(salary)}/><Stat n="Other Expenses" v={money(other)}/><Stat n="Total Expense" v={money(dayTotal)}/></div>
+  <Panel t={`Expenses — ${fmtDate(date)}`}>
+   {dayRows.length===0?<div className="empty">No expenses recorded for this date.</div>:<div className="tablewrap"><table><thead><tr><th>Type</th><th>Description</th><th>Amount</th></tr></thead><tbody>
+    {dayRows.map(x=><tr key={x.id}><td><span className={x.expense_type==='SALARY'?'expenseType salary':'expenseType'}>{x.expense_type==='SALARY'?'AUTO SALARY':'MANUAL'}</span></td><td>{x.description}</td><td><b>{money(x.amount)}</b></td></tr>)}
+   </tbody></table></div>}
+  </Panel>
+  <Panel t="Recent Expense History"><TableSimple heads={['Date','Type','Description','Amount']} rows={data.slice(0,60).map(x=>[x.expense_date,x.expense_type==='SALARY'?'Auto Salary':'Manual',x.description,money(x.amount)])}/></Panel>
+ </>;
+}
 function exportSales(rows,type){
  const data=rows.map(o=>({Date:fmtDate(o.paid_at||o.created_at),Time:new Date(o.paid_at||o.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}),Type:orderType(o),Source:orderType(o)==='TAKEAWAY'?orderSource(o):'',Table:o.table_no??'',Group:orderType(o)==='DINE_IN'?seatLabel(o):'',Total:Number(o.total||0),Payment:paymentBadge(o.payment_method).replace(/^[^ ]+ /,'')}));
  if(type==='CSV'){const keys=Object.keys(data[0]||{Date:'',Time:'',Table:'',Total:0,Payment:''});const esc=v=>`"${String(v??'').replace(/"/g,'""')}"`;const csv=[keys.join(','),...data.map(r=>keys.map(k=>esc(r[k])).join(','))].join('\\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`brottta-sales-${today()}.csv`;a.click();return}
  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sales');XLSX.writeFile(wb,`brottta-sales-${today()}.xlsx`);
 }
-function Analytics({orders,expenses}){
+function Analytics({orders,expenses,adjustments}){
  const [from,setFrom]=useState(today()),[to,setTo]=useState(today());
  const paid=rangeFilterOrders(orders.filter(o=>o.status==='PAID'),from,to);
  const sales=paid.reduce((s,o)=>s+total(o),0),cost=expenses.filter(e=>e.expense_date>=from&&e.expense_date<=to).reduce((s,e)=>s+Number(e.amount||0),0),cash=paid.filter(o=>o.payment_method==='CASH').reduce((s,o)=>s+total(o),0),online=paid.filter(o=>o.payment_method==='ONLINE').reduce((s,o)=>s+total(o),0);
+ const adjustment=(adjustments||[]).filter(a=>a.adjustment_date>=from&&a.adjustment_date<=to).reduce((s,a)=>s+Number(a.amount||0),0);
+ const adjustedSales=sales+adjustment,profit=adjustedSales-cost;
  const top={};paid.forEach(o=>(o.order_items||[]).forEach(i=>top[i.item_name]=(top[i.item_name]||0)+Number(i.qty||0)));
 
  const hourly=Array.from({length:24},(_,h)=>({hour:h,label:`${String(h).padStart(2,'0')}:00`,sales:0,orders:0}));
@@ -1205,7 +1363,8 @@ function Analytics({orders,expenses}){
  const maxDay=Math.max(1,...week.map(x=>x.sales)),bestDay=week.slice().sort((a,b)=>b.sales-a.sales)[0];
 
  return <><Title t="Sales Analytics" s="Sales trends by date, time of day and last 7 days"/><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}/><div className="exportBar"><button className="primary compactBtn" onClick={()=>exportSales(paid,'CSV')}>⬇ CSV</button><button className="primary compactBtn" onClick={()=>exportSales(paid,'XLSX')}>⬇ Excel</button></div>
-  <div className="stats"><Stat n="Sales" v={money(sales)}/><Stat n="Cash" v={money(cash)}/><Stat n="Online" v={money(online)}/><Stat n="Expenses" v={money(cost)}/><Stat n="Net" v={money(sales-cost)}/><Stat n="Paid Bills" v={paid.length}/></div>
+  <div className="stats"><Stat n="Total Sales" v={money(sales)}/><Stat n="Adjustment" v={`${adjustment>0?'+':''}${money(adjustment)}`}/><Stat n="Adjusted Sales" v={money(adjustedSales)}/><Stat n="Expenses" v={money(cost)}/><Stat n="Profit" v={money(profit)}/><Stat n="Paid Bills" v={paid.length}/></div>
+  <div className="stats"><Stat n="Cash" v={money(cash)}/><Stat n="Online" v={money(online)}/></div>
   <div className="insightGrid"><div className="insightCard"><span>Best sales time</span><b>{bestHour?bestHour.label:'—'}</b><small>{bestHour?`${money(bestHour.sales)} from ${bestHour.orders} orders`:'No sales in selected range'}</small></div><div className="insightCard"><span>Best day — last 7 days</span><b>{bestDay&&bestDay.sales?fmtDate(bestDay.date):'—'}</b><small>{bestDay&&bestDay.sales?`${money(bestDay.sales)} from ${bestDay.orders} orders`:'No paid sales in last 7 days'}</small></div></div>
   <Panel t="Sales by Time of Day">{activeHours.length===0?<div className="empty">No paid sales for this range.</div>:<div className="trendBars">{activeHours.map(x=><div className="trendRow" key={x.hour}><span>{x.label}</span><div className="trendTrack"><i style={{width:`${Math.max(3,x.sales/maxHour*100)}%`}}/></div><b>{money(x.sales)}</b><small>{x.orders} orders</small></div>)}</div>}</Panel>
   <Panel t="Last 7 Days Performance"><div className="trendBars">{week.map(x=><div className={`trendRow ${bestDay?.date===x.date&&x.sales>0?'best':''}`} key={x.date}><span>{fmtDate(x.date)}</span><div className="trendTrack"><i style={{width:`${x.sales?Math.max(3,x.sales/maxDay*100):0}%`}}/></div><b>{money(x.sales)}</b><small>{x.orders} orders</small></div>)}</div></Panel>

@@ -450,3 +450,33 @@ button{min-height:32px}
 .directPaymentActions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
 .directPaymentActions .paymentBtn{min-height:42px;font-size:13px;font-weight:900}
 @media(max-width:520px){.directPaymentActions{grid-template-columns:1fr}.directPaymentActions .paymentBtn{min-height:38px}}
+
+/* ===== v18.6 Daily Finance ===== */
+.financeStats{grid-template-columns:repeat(auto-fit,minmax(155px,1fr))}
+.financeStats .stat:last-child{border-color:var(--orange);background:var(--orangeSoft)}
+.salesAdjustmentBox{display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1.5fr) auto;gap:10px;align-items:end}
+.salesAdjustmentBox label{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:800}
+.adjustmentExplanation{grid-column:1/-1;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--surface2)}
+.adjustmentExplanation small{color:var(--muted)}
+.adjustmentResult{grid-column:1/-1;display:flex;justify-content:space-between;padding:10px 12px;border-radius:9px;background:var(--orangeSoft);border:1px solid var(--orange)}
+.adjustmentResult b{color:var(--orange);font-size:17px}
+.positiveAmount{color:#22c55e!important}
+.negativeAmount{color:#ef4444!important}
+.attendanceSubmitSummary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.attendanceSubmitSummary>div{display:flex;flex-direction:column;gap:3px;padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface2)}
+.attendanceSubmitSummary span{font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800}
+.attendanceSubmitSummary b{font-size:16px}
+.attendanceSubmitBar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;padding:11px;border:1px solid var(--border);border-radius:10px;background:var(--surface2)}
+.attendanceSubmitBar small{color:var(--muted);max-width:60%}
+.expenseType{display:inline-flex;padding:4px 7px;border-radius:999px;font-size:9px;font-weight:900;background:var(--surface2);border:1px solid var(--border)}
+.expenseType.salary{background:var(--orangeSoft);color:var(--orange);border-color:var(--orange)}
+@media(max-width:720px){
+ .salesAdjustmentBox{grid-template-columns:1fr}
+ .adjustmentExplanation,.adjustmentResult{grid-column:1}
+ .attendanceSubmitSummary{grid-template-columns:1fr 1fr 1fr}
+ .attendanceSubmitBar{align-items:stretch;flex-direction:column}
+ .attendanceSubmitBar small{max-width:100%}
+}
+@media(max-width:440px){
+ .attendanceSubmitSummary{grid-template-columns:1fr}
+}
